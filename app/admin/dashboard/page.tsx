@@ -3,6 +3,7 @@ import connectToDatabase from '@/lib/mongodb';
 import { requireUser } from '@/lib/auth/require';
 import { getCurrentSite } from '@/lib/site/context';
 import Blog from '@/models/Blog';
+import Event from '@/models/Event';
 import Author from '@/models/Author';
 import FAQ from '@/models/FAQ';
 import Whitepaper from '@/models/Whitepaper';
@@ -47,9 +48,10 @@ export default async function AdminDashboard() {
 
   await connectToDatabase();
   const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  const [blogs, whitepapers, authors, faqs, releaseNotes, subscribers, recentBlogs] =
+  const [blogs, events, whitepapers, authors, faqs, releaseNotes, subscribers, recentBlogs] =
     await Promise.all([
       Blog.countDocuments({ siteId: site.id, status: 'publish' }),
+      Event.countDocuments({ siteId: site.id, status: 'publish' }),
       Whitepaper.countDocuments({ siteId: site.id, status: 'publish' }),
       Author.countDocuments({ siteId: site.id, status: 'publish' }),
       FAQ.countDocuments({ siteId: site.id, status: 'publish' }),
@@ -60,6 +62,7 @@ export default async function AdminDashboard() {
 
   const modules = [
     ['Blogs', 'Write, review, and publish long-form content.', '/admin/dashboard/blogs', blogs],
+    ['Events', 'Create and publish events for your audience.', '/admin/dashboard/events', events],
     ['Authors', 'Manage bylines and public author profiles.', '/admin/dashboard/authors', authors],
     ['FAQs', 'Maintain public answers and review submissions.', '/admin/dashboard/faqs', faqs],
     [

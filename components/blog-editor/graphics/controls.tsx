@@ -59,10 +59,12 @@ export function NumberField({
   label,
   value,
   onChange,
+  placeholder,
 }: {
   label: string;
   value: number;
   onChange: (v: number) => void;
+  placeholder?: string;
 }) {
   return (
     <Field label={label}>
@@ -70,8 +72,9 @@ export function NumberField({
         type="number"
         className={inputCls}
         style={inputStyle}
-        value={Number.isFinite(value) ? value : 0}
-        onChange={(e) => onChange(Number(e.target.value))}
+        placeholder={placeholder}
+        value={Number.isFinite(value) ? value : ''}
+        onChange={(e) => onChange(e.target.value === '' ? Number.NaN : Number(e.target.value))}
       />
     </Field>
   );
@@ -126,6 +129,29 @@ export function Toggle({
       />
       <span className="text-sm text-gray-700">{label}</span>
     </label>
+  );
+}
+
+export function RemoveButton({
+  onClick,
+  label,
+  disabled,
+}: {
+  onClick: () => void;
+  label: string;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+      className="flex h-6 w-6 flex-none items-center justify-center rounded-full text-base leading-none text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-400"
+    >
+      ×
+    </button>
   );
 }
 

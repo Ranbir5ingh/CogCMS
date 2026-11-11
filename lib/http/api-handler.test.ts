@@ -11,7 +11,7 @@ describe('v1 responses', () => {
     const first = apiJson(request, schema, { data: { id: 'site-1' } });
     const second = apiJson(request, schema, { data: { id: 'site-1' } });
     expect(first.status).toBe(200);
-    expect(first.headers.get('x-cms-version')).toBe('1');
+    expect(first.headers.get('x-cms-version')).toBe('1.1');
     expect(first.headers.get('cache-control')).toBe('private, max-age=60');
     expect(first.headers.get('etag')).toMatch(/^W\/[\"]{1}[a-f\d]{64}[\"]{1}$/);
     expect(second.headers.get('etag')).toBe(first.headers.get('etag'));
@@ -29,7 +29,7 @@ describe('v1 responses', () => {
     expect(response.status).toBe(304);
     expect(await response.text()).toBe('');
     expect(response.headers.get('etag')).toBe(initial.headers.get('etag'));
-    expect(response.headers.get('x-cms-version')).toBe('1');
+    expect(response.headers.get('x-cms-version')).toBe('1.1');
   });
 
   it('refuses output that violates the declared contract', () => {

@@ -7,6 +7,7 @@ import { useState, type ReactNode } from 'react';
 const contentLinks = [
   ['Dashboard', '/admin/dashboard'],
   ['Blogs', '/admin/dashboard/blogs'],
+  ['Events', '/admin/dashboard/events'],
   ['Authors', '/admin/dashboard/authors'],
   ['FAQs', '/admin/dashboard/faqs'],
   ['Whitepapers', '/admin/dashboard/whitepapers'],

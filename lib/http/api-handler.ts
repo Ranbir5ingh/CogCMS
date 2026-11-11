@@ -9,7 +9,7 @@ import connectToDatabase from '@/lib/mongodb';
 import Site, { type ISite } from '@/models/Site';
 import { unauthorized } from '@/lib/http/errors';
 
-export const CMS_API_VERSION = '1';
+export const CMS_API_VERSION = '1.1';
 export const CMS_CACHE_CONTROL = 'private, max-age=60';
 
 function withContractHeaders(response: NextResponse, etag?: string): NextResponse {

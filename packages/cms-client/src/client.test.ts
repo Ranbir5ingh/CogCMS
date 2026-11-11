@@ -40,21 +40,19 @@ describe('CMS client', () => {
   });
 
   it('offers every resource method and returns single resources without their envelope', async () => {
-    const fetch = vi
-      .fn()
-      .mockResolvedValue(
-        json({
-          data: {
-            id: '1',
-            slug: 'ada',
-            name: 'Ada',
-            role: '',
-            bio: '',
-            avatarUrl: '',
-            socials: { x: '', linkedin: '', website: '' },
-          },
-        }),
-      );
+    const fetch = vi.fn().mockResolvedValue(
+      json({
+        data: {
+          id: '1',
+          slug: 'ada',
+          name: 'Ada',
+          role: '',
+          bio: '',
+          avatarUrl: '',
+          socials: { x: '', linkedin: '', website: '' },
+        },
+      }),
+    );
     const client = createCmsClient({
       baseUrl: 'https://cms.example.com/api/v1',
       apiKey: 'key',
@@ -69,6 +67,7 @@ describe('CMS client', () => {
       faqs: { list: expect.any(Function) },
       whitepapers: { list: expect.any(Function), get: expect.any(Function) },
       releaseNotes: { list: expect.any(Function), get: expect.any(Function) },
+      events: { list: expect.any(Function), get: expect.any(Function) },
       intake: { faqSubmission: expect.any(Function), newsletter: expect.any(Function) },
     });
   });

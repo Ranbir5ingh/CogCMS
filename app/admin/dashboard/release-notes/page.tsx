@@ -3,6 +3,10 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSite } from '@/components/admin/site-provider';
+import { useToast } from '@/components/admin/toast-provider';
+import { TOAST_MESSAGES } from '@/components/admin/toast-messages';
+import { ConfirmDialog } from '@/components/admin/confirm-dialog';
+import { RowActionsMenu, ROW_ACTION_ITEM_CLASS } from '@/components/admin/row-actions-menu';
 import { publicUrlFor } from '@/lib/site/urls';
 
 interface ReleaseNoteRow {
@@ -17,7 +21,7 @@ export default function ReleaseNotesPage() {
   const site = useSite();
   const [notes, setNotes] = useState<ReleaseNoteRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { showToast } = useToast();
 
   useEffect(() => {
     if (!site?.id) {
@@ -28,108 +32,186 @@ export default function ReleaseNotesPage() {
 
     const controller = new AbortController();
     setLoading(true);
-    setError(null);
     fetch('/api/admin/release-notes', { cache: 'no-store', signal: controller.signal })
       .then(async (response) => {
         const body = await response.json();
-        if (!response.ok) throw new Error(body.error || 'Could not load release notes.');
+        if (!response.ok) throw new Error(body.error || TOAST_MESSAGES.releaseNotes.listLoadFailed);
         setNotes(Array.isArray(body) ? body : []);
       })
       .catch((reason) => {
         if (reason instanceof DOMException && reason.name === 'AbortError') return;
-        setError(reason instanceof Error ? reason.message : 'Could not load release notes.');
+        showToast(
+          'error',
+          reason instanceof Error ? reason.message : TOAST_MESSAGES.releaseNotes.listLoadFailed,
+        );
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [site?.id]);
+  }, [site?.id, showToast]);
 
-  async function remove(slug: string) {
-    if (!window.confirm(`Delete release note ${slug}?`)) return;
-    const response = await fetch(`/api/admin/release-notes/${encodeURIComponent(slug)}`, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-    });
-    if (response.ok) setNotes((current) => current.filter((note) => note.slug !== slug));
-    else setError((await response.json()).error || 'Could not delete release note.');
+  const [noteToDelete, setNoteToDelete] = useState<string | null>(null);
+
+  async function confirmDelete() {
+    if (!noteToDelete) return;
+    const slug = noteToDelete;
+    try {
+      const response = await fetch(`/api/admin/release-notes/${encodeURIComponent(slug)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (response.ok) {
+        setNotes((current) => current.filter((note) => note.slug !== slug));
+        showToast('success', TOAST_MESSAGES.releaseNotes.deleted);
+        return;
+      }
+      const body = await response.json().catch(() => null);
+      showToast('error', body?.error || TOAST_MESSAGES.releaseNotes.deleteFailed);
+    } catch {
+      showToast('error', TOAST_MESSAGES.releaseNotes.deleteFailed);
+    } finally {
+      setNoteToDelete(null);
+    }
   }
 
   const publicBase = site ? publicUrlFor(site, 'releaseNotes') : null;
 
   return (
-    <section className="mx-auto max-w-5xl px-5 py-10 sm:px-8 sm:py-14">
-      <div className="flex flex-col gap-4 border-b border-stone-200 pb-7 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-sm font-medium text-orange-700">{site?.name}</p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Release notes</h1>
-          <p className="mt-2 text-sm text-stone-600">
-            Edit versioned updates stored for this site.
-          </p>
+    <div className="min-h-screen bg-[#FDFAF7] text-[#1a1a1a]">
+      <div className="max-w-5xl mx-auto px-8 py-12">
+        <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center gap-4">
+            <Link
+              href="/admin/dashboard"
+              className="text-gray-400 hover:text-gray-800 transition-colors"
+            >
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M19 12H5M12 19l-7-7 7-7" />
+              </svg>
+            </Link>
+            <h1
+              className="text-2xl md:text-3xl"
+              style={{
+                fontWeight: 600,
+                color: '#1a1a1a',
+                letterSpacing: '-0.03em',
+              }}
+            >
+              Manage Release Notes
+            </h1>
+          </div>
+          <Link
+            href="/admin/dashboard/release-notes/new"
+            className="px-5 py-2.5 text-white rounded-xl shadow-md hover:shadow-lg transition-all text-sm"
+            style={{
+              background: 'linear-gradient(135deg, #FF751F, #ff9044)',
+              fontWeight: 600,
+              boxShadow: '0 4px 16px rgba(255,117,31,0.25)',
+            }}
+          >
+            + Create New Release Note
+          </Link>
         </div>
-        <Link
-          href="/admin/dashboard/release-notes/new"
-          className="w-fit rounded-xl bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-orange-700 active:translate-y-px"
+
+        <div
+          className="rounded-2xl border overflow-hidden"
+          style={{
+            backgroundColor: 'rgba(255,255,255,0.7)',
+            backdropFilter: 'blur(16px)',
+            borderColor: 'rgba(0,0,0,0.06)',
+            boxShadow: '0 4px 24px rgba(0,0,0,0.03)',
+          }}
         >
-          New release note
-        </Link>
+          {loading ? (
+            <p className="p-8 text-gray-500 text-center">Loading release notes...</p>
+          ) : notes.length === 0 ? (
+            <div className="p-12 text-center">
+              <p className="text-gray-400 mb-2">No release notes found.</p>
+              <p className="text-sm text-gray-400">Create your first one to get started.</p>
+            </div>
+          ) : (
+            <div>
+              {notes.map((note, i) => (
+                <div
+                  key={note._id}
+                  className="px-6 py-5 flex items-center justify-between hover:bg-white/60 transition-colors"
+                  style={{
+                    borderBottom: i < notes.length - 1 ? '1px solid rgba(0,0,0,0.04)' : 'none',
+                  }}
+                >
+                  <div className="flex-1">
+                    <Link
+                      href={`/admin/dashboard/release-notes/new?slug=${encodeURIComponent(note.slug)}`}
+                      className="hover:underline"
+                    >
+                      <h3
+                        className="text-base text-[#1a1a1a] mb-1 flex items-center gap-2"
+                        style={{ fontWeight: 600 }}
+                      >
+                        Version {note.version}
+                        {note.status === 'draft' && (
+                          <span
+                            className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium"
+                            style={{ letterSpacing: '0.02em' }}
+                          >
+                            Draft
+                          </span>
+                        )}
+                      </h3>
+                    </Link>
+                    <p className="text-xs text-gray-400 mt-1">
+                      /{note.slug} • {note.dateInput}
+                    </p>
+                  </div>
+                  <RowActionsMenu label={`Actions for release note ${note.version}`}>
+                    <Link
+                      href={`/admin/dashboard/release-notes/new?slug=${encodeURIComponent(note.slug)}`}
+                      className={ROW_ACTION_ITEM_CLASS}
+                    >
+                      Edit
+                    </Link>
+                    {note.status === 'publish' && publicBase ? (
+                      <a
+                        href={`${publicBase}#${encodeURIComponent(note.slug)}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className={ROW_ACTION_ITEM_CLASS}
+                      >
+                        View
+                      </a>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => setNoteToDelete(note.slug)}
+                      className={ROW_ACTION_ITEM_CLASS}
+                    >
+                      Delete
+                    </button>
+                  </RowActionsMenu>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
-      {error ? (
-        <p className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          {error}
-        </p>
-      ) : null}
-      <div className="mt-8 overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
-        {loading ? (
-          <p className="p-8 text-sm text-stone-500">Loading release notes…</p>
-        ) : notes.length === 0 ? (
-          <p className="p-8 text-sm text-stone-500">No release notes for this site.</p>
-        ) : (
-          notes.map((note, index) => (
-            <article
-              key={note._id}
-              className={`flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between ${index ? 'border-t border-stone-100' : ''}`}
-            >
-              <div>
-                <Link
-                  href={`/admin/dashboard/release-notes/new?slug=${encodeURIComponent(note.slug)}`}
-                  className="font-semibold text-stone-900 hover:text-orange-700"
-                >
-                  Version {note.version}
-                </Link>
-                <p className="mt-1 text-xs text-stone-500">
-                  {note.dateInput} · {note.slug}
-                  {note.status === 'draft' ? (
-                    <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-800">
-                      Draft
-                    </span>
-                  ) : null}
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                {note.status === 'publish' && publicBase ? (
-                  <a
-                    href={`${publicBase}#${encodeURIComponent(note.slug)}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="rounded-lg border border-stone-200 px-3 py-1.5 text-xs font-medium text-stone-700 hover:border-orange-300"
-                  >
-                    View
-                  </a>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => remove(note.slug)}
-                  className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50"
-                >
-                  Delete
-                </button>
-              </div>
-            </article>
-          ))
-        )}
-      </div>
-    </section>
+      <ConfirmDialog
+        open={!!noteToDelete}
+        onOpenChange={(open) => !open && setNoteToDelete(null)}
+        onConfirm={confirmDelete}
+        title="Delete this release note?"
+        description="Are you absolutely sure you want to delete this release note? This action cannot be undone. It will be removed from this site's release notes."
+      />
+    </div>
   );
 }

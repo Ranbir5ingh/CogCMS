@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useToast } from '@/components/admin/toast-provider';
+import { TOAST_MESSAGES } from '@/components/admin/toast-messages';
 
 type AuthorOpt = { _id: string; name: string; role?: string; avatarUrl?: string };
 
@@ -12,13 +14,20 @@ export default function AuthorPicker({
   onChange: (id: string | null) => void;
 }) {
   const [authors, setAuthors] = useState<AuthorOpt[]>([]);
+  const { showToast } = useToast();
 
   const load = useCallback(() => {
     fetch('/api/admin/authors')
       .then((r) => r.json())
-      .then((d) => Array.isArray(d) && setAuthors(d))
-      .catch(() => {});
-  }, []);
+      .then((d) => {
+        if (Array.isArray(d)) {
+          setAuthors(d);
+          return;
+        }
+        showToast('error', d?.error || TOAST_MESSAGES.authors.listLoadFailed);
+      })
+      .catch(() => showToast('error', TOAST_MESSAGES.authors.listLoadFailed));
+  }, [showToast]);
 
   useEffect(() => {
     load();

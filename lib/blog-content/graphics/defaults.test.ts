@@ -5,13 +5,27 @@ import { graphicConfigSchema, type GraphicType } from './types';
 describe('GRAPHIC_DEFAULTS', () => {
   const types: GraphicType[] = ['stat-cards', 'callout', 'comparison'];
 
-  it('provides a schema-valid default for each graphic type', () => {
+  it('provides a default of the right shape for each graphic type', () => {
     for (const type of types) {
-      const cfg = GRAPHIC_DEFAULTS[type]();
-      const result = graphicConfigSchema.safeParse(cfg);
-      expect(result.success).toBe(true);
-      expect(cfg.type).toBe(type);
+      expect(GRAPHIC_DEFAULTS[type]().type).toBe(type);
     }
+  });
+
+  it('starts text graphics blank but still schema-valid', () => {
+    for (const type of ['callout', 'comparison'] as GraphicType[]) {
+      expect(graphicConfigSchema.safeParse(GRAPHIC_DEFAULTS[type]()).success).toBe(true);
+    }
+  });
+
+  it('rejects stat cards until a real number replaces the blank field', () => {
+    const blank = GRAPHIC_DEFAULTS['stat-cards']();
+    expect(graphicConfigSchema.safeParse(blank).success).toBe(false);
+
+    const filled = {
+      ...blank,
+      cards: blank.cards.map((card) => ({ ...card, number: 12, label: 'Revenue' })),
+    };
+    expect(graphicConfigSchema.safeParse(filled).success).toBe(true);
   });
 
   it('returns a fresh object each call (no shared mutable state)', () => {

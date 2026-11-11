@@ -26,7 +26,7 @@ describe('v1 site and content resources', () => {
       rootContext,
     );
     expect(response.status).toBe(200);
-    expect(response.headers.get('x-cms-version')).toBe('1');
+    expect(response.headers.get('x-cms-version')).toBe('1.1');
     const body = await response.json();
     expect(body.data).toMatchObject({
       id: site._id.toString(),

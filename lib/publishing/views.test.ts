@@ -54,7 +54,7 @@ describe('published Mongo view boundary', () => {
     operator.on('commandStarted', capture);
     try {
       const plan = await provisionPublishedViews(db, siteA.toHexString());
-      expect(plan).toHaveLength(6);
+      expect(plan).toHaveLength(7);
       expect(plan.every((view) => view.action === 'create')).toBe(true);
       expect(commands).toHaveLength(1);
       expect(commands[0].filter).toEqual({});
@@ -84,11 +84,12 @@ describe('published Mongo view boundary', () => {
       expect(() => publishedViews(bad)).toThrow();
     }
     expect(publishedViews(siteA.toHexString().toUpperCase()).map((v) => v.name)).toEqual(
-      ['site', 'posts', 'authors', 'faqs', 'whitepapers', 'release_notes'].map(
+      ['events', 'site', 'posts', 'authors', 'faqs', 'whitepapers', 'release_notes'].map(
         (k) => `cms_v1_${siteA}_${k}`,
       ),
     );
     expect(publishedViews(siteA.toHexString()).map((v) => v.viewOn)).toEqual([
+      'events',
       'sites',
       'blogs',
       'authors',
@@ -100,7 +101,7 @@ describe('published Mongo view boundary', () => {
 
   it('defaults to dry run and provisions identical views idempotently', async () => {
     const plan = await provisionPublishedViews(db, siteA.toHexString());
-    expect(plan).toHaveLength(6);
+    expect(plan).toHaveLength(7);
     expect(await db.listCollections({ type: 'view' }).toArray()).toHaveLength(0);
     await provisionPublishedViews(db, siteA.toHexString(), { write: true });
     expect(
@@ -131,7 +132,14 @@ describe('published Mongo view boundary', () => {
   });
 
   it('excludes drafts, other sites and unlisted nested fields for every content kind', async () => {
-    for (const collection of ['blogs', 'authors', 'faqs', 'whitepapers', 'release_notes']) {
+    for (const collection of [
+      'events',
+      'blogs',
+      'authors',
+      'faqs',
+      'whitepapers',
+      'release_notes',
+    ]) {
       await db.collection(collection).insertMany([
         {
           siteId: siteA,

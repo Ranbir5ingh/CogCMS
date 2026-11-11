@@ -35,6 +35,12 @@ function RenderText({ text }: { text: string }) {
   );
 }
 
+function numberFor(items: ReleaseNote['sections'][number]['items'], index: number): number {
+  let number = 1;
+  for (let i = index - 1; i >= 0 && items[i].type === 'numbered'; i -= 1) number += 1;
+  return number;
+}
+
 export function ReleaseNoteCard({ note, index = 0 }: { note: ReleaseNote; index?: number }) {
   return (
     <motion.article
@@ -75,7 +81,16 @@ export function ReleaseNoteCard({ note, index = 0 }: { note: ReleaseNote; index?
                     <h4 key={itemIndex} className="mt-3.5 text-[13px] font-semibold text-stone-900">
                       <RenderText text={item.text} />
                     </h4>
-                  ) : item.type === 'bullet' || item.type === 'numbered' ? (
+                  ) : item.type === 'numbered' ? (
+                    <div key={itemIndex} className="flex items-start gap-2.5">
+                      <span className="min-w-[1.25rem] shrink-0 text-[14px] font-semibold leading-relaxed text-orange-500">
+                        {numberFor(section.items, itemIndex)}.
+                      </span>
+                      <span className="text-[14px] leading-relaxed text-stone-600">
+                        <RenderText text={item.text} />
+                      </span>
+                    </div>
+                  ) : item.type === 'bullet' ? (
                     <div key={itemIndex} className="flex items-start gap-2.5">
                       <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-orange-400" />
                       <span className="text-[14px] leading-relaxed text-stone-600">

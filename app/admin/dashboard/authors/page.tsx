@@ -2,12 +2,39 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useToast } from '@/components/admin/toast-provider';
+import { TOAST_MESSAGES } from '@/components/admin/toast-messages';
+import { ConfirmDialog } from '@/components/admin/confirm-dialog';
+import { RowActionsMenu, ROW_ACTION_ITEM_CLASS } from '@/components/admin/row-actions-menu';
 
 type Author = { _id: string; name: string; slug: string; role?: string };
 
 export default function AuthorsListPage() {
   const [authors, setAuthors] = useState<Author[]>([]);
   const [loading, setLoading] = useState(true);
+  const [authorToDelete, setAuthorToDelete] = useState<Author | null>(null);
+  const { showToast } = useToast();
+
+  const confirmDelete = async () => {
+    if (!authorToDelete) return;
+    const target = authorToDelete;
+    setAuthorToDelete(null);
+    try {
+      const response = await fetch(`/api/admin/authors/${encodeURIComponent(target.slug)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        showToast('error', body?.error || TOAST_MESSAGES.authors.deleteFailed);
+        return;
+      }
+      setAuthors((current) => current.filter((a) => a._id !== target._id));
+      showToast('success', TOAST_MESSAGES.authors.deleted);
+    } catch {
+      showToast('error', TOAST_MESSAGES.authors.deleteFailed);
+    }
+  };
 
   useEffect(() => {
     fetch('/api/admin/authors', { cache: 'no-store' })
@@ -17,15 +44,17 @@ export default function AuthorsListPage() {
           setAuthors(d);
         } else {
           console.error('API Error:', d);
+          showToast('error', d?.error || TOAST_MESSAGES.authors.listLoadFailed);
           setAuthors([]);
         }
         setLoading(false);
       })
       .catch((err) => {
         console.error(err);
+        showToast('error', TOAST_MESSAGES.authors.listLoadFailed);
         setLoading(false);
       });
-  }, []);
+  }, [showToast]);
 
   return (
     <div className="min-h-screen bg-[#FDFAF7] text-[#1a1a1a]">
@@ -99,7 +128,7 @@ export default function AuthorsListPage() {
                     borderBottom: i < authors.length - 1 ? '1px solid rgba(0,0,0,0.04)' : 'none',
                   }}
                 >
-                  <div className="flex-1">
+                  <div className="min-w-0 flex-1">
                     <h3 className="text-base text-[#1a1a1a] mb-1" style={{ fontWeight: 600 }}>
                       {author.name}
                       {author.role && (
@@ -113,12 +142,35 @@ export default function AuthorsListPage() {
                     </h3>
                     <p className="text-xs text-gray-400">/{author.slug}</p>
                   </div>
+                  <RowActionsMenu label={`Actions for ${author.name}`}>
+                    <Link
+                      href={`/admin/dashboard/authors/${encodeURIComponent(author.slug)}`}
+                      className={ROW_ACTION_ITEM_CLASS}
+                    >
+                      Edit
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => setAuthorToDelete(author)}
+                      className={ROW_ACTION_ITEM_CLASS}
+                    >
+                      Delete
+                    </button>
+                  </RowActionsMenu>
                 </div>
               ))}
             </div>
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={!!authorToDelete}
+        onOpenChange={(open) => !open && setAuthorToDelete(null)}
+        onConfirm={confirmDelete}
+        title="Delete this author?"
+        description="This permanently removes the author profile. Authors used by a published article cannot be deleted until those articles are reassigned."
+      />
     </div>
   );
 }

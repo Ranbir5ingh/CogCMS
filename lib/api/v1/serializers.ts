@@ -137,6 +137,7 @@ export function serializePostSummary(
     slug: blog.slug,
     excerpt: blog.excerpt || blog.metaDescription || '',
     imageUrl: blog.imageUrl,
+    imageAlt: blog.imageAlt ?? '',
     tag: blog.tag ?? '',
     category: blog.category ?? '',
     tags: [...blog.tags],

@@ -28,3 +28,6 @@ guidelines
 *.key
 *.p12
 *.pfx
+
+output/cms-publishing
+output/build-tools

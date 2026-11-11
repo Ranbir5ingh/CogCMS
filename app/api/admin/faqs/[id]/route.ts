@@ -19,6 +19,15 @@ function faqUpdate(raw: unknown): Record<string, unknown> {
   return parsed.data;
 }
 
+export const GET = withAdmin<Params>(async (_req, { params, site }) => {
+  const { id } = await params;
+  if (!validId(id)) throw notFound('FAQ');
+  await connectToDatabase();
+  const faq = await FAQ.findOne({ _id: id, siteId: site.id }).exec();
+  if (!faq) throw notFound('FAQ');
+  return NextResponse.json(faq);
+});
+
 export const PUT = withAdmin<Params>(async (req, { params, user, site }) => {
   const { id } = await params;
   if (!validId(id)) throw notFound('FAQ');

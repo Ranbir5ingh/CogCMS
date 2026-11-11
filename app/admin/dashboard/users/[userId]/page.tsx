@@ -20,10 +20,12 @@ export default function EditUserPage() {
   }, [userId]);
 
   return (
-    <section className="mx-auto max-w-4xl px-5 py-10 sm:px-8 sm:py-14">
-      <h1 className="text-3xl font-semibold tracking-tight">Edit user</h1>
-      <p className="mt-2 mb-8 text-sm text-stone-600">Update access without exposing password hashes or audit fields.</p>
-      {error ? <p role="alert" className="text-sm text-red-700">The user could not be loaded.</p> : null}
+    <section className="mx-auto max-w-7xl px-5 py-8 sm:px-8 sm:py-12">
+      {error ? (
+        <p role="alert" className="text-sm text-red-700">
+          The user could not be loaded.
+        </p>
+      ) : null}
       {!error && !user ? <p className="text-sm text-stone-500">Loading user...</p> : null}
       {user ? <UserForm user={user} /> : null}
     </section>

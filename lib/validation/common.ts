@@ -10,6 +10,26 @@ export const slugSchema = z
   .max(160)
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'Must be a lowercase URL-safe slug');
 
+const DOMAIN_PATTERN =
+  /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,}$/i;
+
+export function isPublicHttpUrl(value: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+  return DOMAIN_PATTERN.test(parsed.hostname);
+}
+
+export const optionalUrlSchema = z
+  .string()
+  .trim()
+  .refine((value) => value === '' || isPublicHttpUrl(value), 'Must be a valid http(s) URL')
+  .optional();
+
 /** Validate a non-blank source string without altering its bytes. */
 export const requiredSourceTextSchema = z
   .string()

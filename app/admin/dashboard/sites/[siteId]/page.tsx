@@ -21,11 +21,7 @@ export default function EditSitePage() {
   }, [siteId]);
 
   return (
-    <section className="mx-auto max-w-4xl px-5 py-10 sm:px-8 sm:py-14">
-      <h1 className="text-3xl font-semibold tracking-tight">Edit site</h1>
-      <p className="mt-2 mb-8 text-sm text-stone-600">
-        Changes affect site selection and future public contracts.
-      </p>
+    <section className="mx-auto max-w-7xl px-5 py-8 sm:px-8 sm:py-12">
       {error ? (
         <p role="alert" className="text-sm text-red-700">
           The site could not be loaded.
@@ -35,7 +31,9 @@ export default function EditSitePage() {
       {site ? (
         <>
           <SiteForm site={site} />
-          <ApiKeysPanel siteId={site.id} />
+          <div className="max-w-4xl">
+            <ApiKeysPanel siteId={site.id} />
+          </div>
         </>
       ) : null}
     </section>

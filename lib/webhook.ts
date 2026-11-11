@@ -6,7 +6,8 @@ import Site from '@/models/Site';
 export const WEBHOOK_TIMEOUT_MS = 5_000;
 export const WEBHOOK_RETRY_DELAY_MS = 2_000;
 
-export type ContentType = 'post' | 'author' | 'faq' | 'whitepaper' | 'releaseNote' | 'site';
+export type ContentType =
+  'post' | 'author' | 'faq' | 'whitepaper' | 'releaseNote' | 'event' | 'site';
 export type WebhookEventType =
   'content.published' | 'content.updated' | 'content.unpublished' | 'content.deleted';
 export type WebhookEvent = {

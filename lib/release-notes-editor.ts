@@ -106,10 +106,18 @@ function blockToMarkdown(element: HTMLElement): string {
     return text ? `### ${text}` : '';
   }
   if (tag === 'ul' || tag === 'ol') {
+    let number = 0;
     return Array.from(element.querySelectorAll(':scope > li'))
-      .map((item, index) => {
+      .map((item) => {
         const text = normalizeInline(inlineNodeToMarkdown(item));
-        return text ? `${tag === 'ul' ? '-' : `${index + 1}.`} ${text}` : '';
+        if (!text) return '';
+        const kind = item.getAttribute('data-list') ?? (tag === 'ul' ? 'bullet' : 'ordered');
+        if (kind !== 'ordered') {
+          number = 0;
+          return `- ${text}`;
+        }
+        number += 1;
+        return `${number}. ${text}`;
       })
       .filter(Boolean)
       .join('\n');

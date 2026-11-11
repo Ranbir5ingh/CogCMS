@@ -1,13 +1,19 @@
 'use client';
 
 import { Suspense, useEffect, useMemo, useState, type ChangeEvent } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import 'react-quill-new/dist/quill.snow.css';
 import { contentToBlocks } from '@/lib/whitepaper-content';
 import { WhitepaperArticle } from '@/components/preview/whitepaper-article';
 import { useSite } from '@/components/admin/site-provider';
+import { useToast } from '@/components/admin/toast-provider';
+import { TOAST_MESSAGES } from '@/components/admin/toast-messages';
+import { ConfirmDialog } from '@/components/admin/confirm-dialog';
+import { makeFormStateKey, useSessionFormState } from '@/lib/admin/session-form-state';
+import { useLeaveGuard } from '@/lib/admin/use-leave-guard';
+import { useEditorBaseline } from '@/lib/admin/use-editor-baseline';
 
 const ReactQuill = dynamic(() => import('react-quill-new'), { ssr: false });
 
@@ -36,10 +42,10 @@ const DEFAULT_DATA: WhitepaperFormData = {
   slug: '',
   description: '',
   date: new Date().toISOString().slice(0, 10),
-  author: 'Research Team',
-  authorRole: 'AI Search Strategist',
+  author: '',
+  authorRole: '',
   readTime: '',
-  tags: 'AEO, GEO, AI Search',
+  tags: '',
   headline: '',
   stat1Value: '',
   stat1Label: '',
@@ -48,9 +54,35 @@ const DEFAULT_DATA: WhitepaperFormData = {
   metaTitle: '',
   metaDescription: '',
   keywords: '',
-  content:
-    '<h1>Whitepaper Title</h1><h2>Executive Summary</h2><p>Write your whitepaper content in the editor.</p>',
+  content: '',
 };
+
+// Character limits per field; the Field component reads its own limit from here.
+const LIMITS: Partial<Record<keyof WhitepaperFormData, number>> = {
+  title: 150,
+  slug: 160,
+  description: 3000,
+  author: 80,
+  authorRole: 80,
+  readTime: 20,
+  tags: 200,
+  headline: 150,
+  stat1Value: 20,
+  stat1Label: 80,
+  stat2Value: 20,
+  stat2Label: 80,
+  metaTitle: 70,
+  metaDescription: 160,
+  keywords: 250,
+};
+const MAX_TAGS = 8;
+const MAX_TAG_LENGTH = 30;
+
+const FALLBACK_AUTHOR = 'Research Team';
+const FALLBACK_AUTHOR_ROLE = 'AI Search Strategist';
+const FALLBACK_TAGS = ['AEO', 'GEO', 'AI Search'];
+const PREVIEW_CONTENT =
+  '<h1>Whitepaper Title</h1><h2>Executive Summary</h2><p>Write your whitepaper content in the editor.</p>';
 
 function slugify(value: string) {
   return value
@@ -98,7 +130,6 @@ function formatPreviewDate(value: string) {
 
 function WhitepaperEditorForm() {
   const site = useSite();
-  const router = useRouter();
   const searchParams = useSearchParams();
   const editSlug = searchParams.get('slug');
 
@@ -106,8 +137,11 @@ function WhitepaperEditorForm() {
   const [originalSlug, setOriginalSlug] = useState<string | null>(null);
   const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [invalidField, setInvalidField] = useState<keyof WhitepaperFormData | null>(null);
   const [loadingData, setLoadingData] = useState(!!editSlug);
-  const [error, setError] = useState<string | null>(null);
+  const [savedSnapshot, setSavedSnapshot] = useState(() => JSON.stringify(DEFAULT_DATA));
+  const isDirty = JSON.stringify(formData) !== savedSnapshot;
+  const { showToast } = useToast();
 
   useEffect(() => {
     if (!editSlug) return;
@@ -118,7 +152,10 @@ function WhitepaperEditorForm() {
     fetch(`/api/admin/whitepapers/${editSlug}`, { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => {
-        if (data?.error) return;
+        if (data?.error) {
+          showToast('error', data.error || TOAST_MESSAGES.whitepapers.loadFailed);
+          return;
+        }
 
         const tags = Array.isArray(data.tags)
           ? data.tags.join(', ')
@@ -126,7 +163,7 @@ function WhitepaperEditorForm() {
             ? data.tags
             : data.tag || '';
 
-        setFormData({
+        const loaded: WhitepaperFormData = {
           title: data.title || '',
           slug: data.slug || '',
           description: data.description || data.excerpt || '',
@@ -135,7 +172,7 @@ function WhitepaperEditorForm() {
             : data.createdAt
               ? new Date(data.createdAt).toISOString().slice(0, 10)
               : DEFAULT_DATA.date,
-          author: data.author || DEFAULT_DATA.author,
+          author: data.author || FALLBACK_AUTHOR,
           authorRole: data.authorRole || '',
           readTime: data.readTime || '',
           tags,
@@ -148,16 +185,34 @@ function WhitepaperEditorForm() {
           metaDescription: data.metaDescription || '',
           keywords: data.keywords || '',
           content: data.content || '',
-        });
+        };
+        setFormData(loaded);
+        setSavedSnapshot(JSON.stringify(loaded));
 
         setSlugManuallyEdited(true);
       })
       .catch((fetchError) => {
         console.error(fetchError);
-        setError('Failed to load whitepaper for editing.');
+        showToast('error', TOAST_MESSAGES.whitepapers.loadFailed);
       })
       .finally(() => setLoadingData(false));
-  }, [editSlug]);
+  }, [editSlug, showToast]);
+
+  const editorBaseline = useEditorBaseline(editSlug);
+  const { clear: clearFormState } = useSessionFormState({
+    storageKey: site?.id ? makeFormStateKey(site.id, 'whitepaper', editSlug) : null,
+    value: formData,
+    isDirty,
+    ready: !loadingData,
+    onRestore: (saved) => {
+      editorBaseline.stop();
+      setFormData((prev) => ({ ...prev, ...saved }));
+      if (typeof saved.slug === 'string' && typeof saved.title === 'string') {
+        setSlugManuallyEdited(saved.slug !== slugify(saved.title));
+      }
+    },
+  });
+  const leaveGuard = useLeaveGuard(isDirty, clearFormState);
 
   const computedReadTime = useMemo(() => estimateReadTime(formData.content), [formData.content]);
   const quillModules = useMemo(
@@ -189,21 +244,22 @@ function WhitepaperEditorForm() {
       title: formData.title || 'Your Whitepaper Title',
       description: formData.description || 'Short description',
       dateFormatted: formatPreviewDate(formData.date || DEFAULT_DATA.date),
-      author: formData.author || DEFAULT_DATA.author,
-      authorRole: formData.authorRole || 'AI Search Strategist',
+      author: formData.author || FALLBACK_AUTHOR,
+      authorRole: formData.authorRole || FALLBACK_AUTHOR_ROLE,
       readTime,
-      tags: tags.length > 0 ? tags : ['AEO', 'GEO', 'AI Search'],
+      tags: tags.length > 0 ? tags : FALLBACK_TAGS,
       headline: formData.headline || formData.title || 'Headline',
       stat1Value: formData.stat1Value,
       stat1Label: formData.stat1Label,
       stat2Value: formData.stat2Value,
       stat2Label: formData.stat2Label,
-      blocks: contentToBlocks(formData.content || DEFAULT_DATA.content),
+      blocks: contentToBlocks(formData.content || PREVIEW_CONTENT),
     };
   }, [computedReadTime, formData]);
 
   const handleChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
+    if (invalidField === name) setInvalidField(null);
 
     if (name === 'slug') {
       setSlugManuallyEdited(true);
@@ -214,6 +270,7 @@ function WhitepaperEditorForm() {
 
   const handleTitleChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const title = e.target.value;
+    if (invalidField === 'title') setInvalidField(null);
     setFormData((prev) => ({
       ...prev,
       title,
@@ -224,32 +281,58 @@ function WhitepaperEditorForm() {
 
   const handleSubmit = async (status: 'draft' | 'publish') => {
     if (!formData.title.trim()) {
-      setError('Title is required.');
+      showToast('error', TOAST_MESSAGES.whitepapers.titleRequired);
       return;
     }
 
     if (!formData.slug.trim()) {
-      setError('Slug is required.');
+      showToast('error', TOAST_MESSAGES.whitepapers.slugRequired);
       return;
     }
 
     if (!formData.description.trim()) {
-      setError('Description is required.');
+      showToast('error', TOAST_MESSAGES.whitepapers.descriptionRequired);
       return;
     }
 
     if (!formData.content.trim()) {
-      setError('Whitepaper content is required.');
+      showToast('error', TOAST_MESSAGES.whitepapers.contentRequired);
+      return;
+    }
+
+    // Inputs cap typing at the limit; this catches older whitepapers saved before it.
+    const overLimit = (Object.keys(LIMITS) as (keyof WhitepaperFormData)[]).find(
+      (key) => formData[key].length > LIMITS[key]!,
+    );
+    if (overLimit) {
+      setInvalidField(overLimit);
+      showToast('error', TOAST_MESSAGES.whitepapers.fieldTooLong);
+      return;
+    }
+
+    const tagList = formData.tags
+      .split(',')
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+    if (tagList.length > MAX_TAGS) {
+      setInvalidField('tags');
+      showToast('error', TOAST_MESSAGES.whitepapers.tooManyTags);
+      return;
+    }
+    if (tagList.some((tag) => tag.length > MAX_TAG_LENGTH)) {
+      setInvalidField('tags');
+      showToast('error', TOAST_MESSAGES.whitepapers.tagTooLong);
       return;
     }
 
     setLoading(true);
-    setError(null);
 
-    const tagsArray = formData.tags
+    const isEdit = !!originalSlug;
+    const enteredTags = formData.tags
       .split(',')
       .map((tag) => tag.trim())
       .filter(Boolean);
+    const tagsArray = enteredTags.length > 0 || isEdit ? enteredTags : FALLBACK_TAGS;
 
     const payload = {
       title: formData.title,
@@ -257,8 +340,8 @@ function WhitepaperEditorForm() {
       description: formData.description,
       excerpt: formData.description,
       date: formData.date,
-      author: formData.author,
-      authorRole: formData.authorRole,
+      author: formData.author || FALLBACK_AUTHOR,
+      authorRole: formData.authorRole || (isEdit ? '' : FALLBACK_AUTHOR_ROLE),
       readTime: formData.readTime || computedReadTime,
       tags: tagsArray,
       tag: tagsArray[0] || 'Research',
@@ -275,7 +358,6 @@ function WhitepaperEditorForm() {
     };
 
     try {
-      const isEdit = !!originalSlug;
       const endpoint = isEdit ? `/api/admin/whitepapers/${originalSlug}` : '/api/admin/whitepapers';
       const method = isEdit ? 'PUT' : 'POST';
 
@@ -287,28 +369,47 @@ function WhitepaperEditorForm() {
 
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error || 'Failed to save whitepaper.');
+        showToast('error', data.error || TOAST_MESSAGES.whitepapers.saveFailed);
         return;
       }
 
-      router.push('/admin/dashboard/whitepapers');
+      showToast(
+        'success',
+        status === 'publish'
+          ? isEdit
+            ? TOAST_MESSAGES.whitepapers.republished
+            : TOAST_MESSAGES.whitepapers.published
+          : TOAST_MESSAGES.whitepapers.draftSaved,
+      );
+      clearFormState();
+      leaveGuard.leaveTo('/admin/dashboard/whitepapers');
     } catch (submitError: any) {
-      setError(submitError.message || 'Failed to save whitepaper.');
+      showToast('error', submitError.message || TOAST_MESSAGES.whitepapers.saveFailed);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#FDFAF7] text-[#1a1a1a]">
-      <div className="flex justify-end px-8 pt-6">
-        <div className="flex items-center gap-2">
+    <section className="mx-auto max-w-7xl px-5 py-8 sm:px-8 sm:py-12">
+      <div className="flex flex-col gap-5 border-b border-stone-200 pb-7 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <Link
+            href="/admin/dashboard/whitepapers"
+            className="text-sm font-medium text-orange-700 hover:text-orange-800"
+          >
+            ← Whitepapers
+          </Link>
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight">
+            {editSlug ? 'Edit whitepaper' : 'New whitepaper'}
+          </h1>
+        </div>
+        <div className="flex gap-2">
           <button
             type="button"
             onClick={() => handleSubmit('draft')}
             disabled={loading || loadingData}
-            className="px-4 py-2 text-[13px] text-gray-600 hover:bg-gray-50 border rounded-full transition-colors disabled:opacity-50"
-            style={{ fontWeight: 500, borderColor: 'rgba(0,0,0,0.12)' }}
+            className="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-stone-700 disabled:opacity-50"
           >
             Save draft
           </button>
@@ -316,264 +417,216 @@ function WhitepaperEditorForm() {
             type="button"
             onClick={() => handleSubmit('publish')}
             disabled={loading || loadingData}
-            className="px-5 py-2 text-[13px] text-white rounded-full shadow-sm transition-all disabled:opacity-50"
-            style={{
-              fontWeight: 600,
-              background: 'linear-gradient(135deg, #1a8917, #2ba52b)',
-              boxShadow: '0 2px 8px rgba(26,137,23,0.3)',
-            }}
+            className="rounded-xl bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-orange-700 disabled:opacity-50"
           >
-            {loading ? 'Saving...' : 'Publish'}
+            {loading ? 'Saving…' : 'Publish'}
           </button>
         </div>
       </div>
 
-      <main className="max-w-6xl mx-auto px-8 py-10">
-        <div className="flex items-center gap-4 mb-8">
-          <Link
-            href="/admin/dashboard/whitepapers"
-            className="text-gray-400 hover:text-gray-800 transition-colors"
-          >
-            <svg
-              width="22"
-              height="22"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M19 12H5M12 19l-7-7 7-7" />
-            </svg>
-          </Link>
-          <h1
-            className="text-2xl md:text-3xl"
-            style={{
-              fontWeight: 600,
-              color: '#1a1a1a',
-              letterSpacing: '-0.03em',
-            }}
-          >
-            {editSlug ? 'Edit Whitepaper' : 'Create Whitepaper'}
-          </h1>
-        </div>
-
-        {error && (
-          <div className="p-4 mb-6 text-sm text-red-700 bg-red-50 rounded-xl border border-red-200">
-            {error}
-          </div>
-        )}
-
-        {loadingData ? (
-          <div className="p-10 text-center text-gray-500">Loading whitepaper...</div>
-        ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_520px] gap-6 items-start">
-            <div
-              className="rounded-2xl border p-6 space-y-5"
-              style={{
-                backgroundColor: 'rgba(255,255,255,0.7)',
-                backdropFilter: 'blur(16px)',
-                borderColor: 'rgba(0,0,0,0.06)',
-                boxShadow: '0 4px 24px rgba(0,0,0,0.03)',
-              }}
-            >
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Field
-                  label="Title"
-                  name="title"
-                  value={formData.title}
-                  onChange={handleTitleChange}
-                />
-                <Field label="Slug" name="slug" value={formData.slug} onChange={handleChange} />
-                <Field
-                  label="Description"
-                  name="description"
-                  value={formData.description}
-                  onChange={handleChange}
-                  multiline
-                />
-                <Field
-                  label="Date"
-                  name="date"
-                  value={formData.date}
-                  onChange={handleChange}
-                  type="date"
-                />
-                <Field
-                  label="Author"
-                  name="author"
-                  value={formData.author}
-                  onChange={handleChange}
-                />
-                <Field
-                  label="Author Role"
-                  name="authorRole"
-                  value={formData.authorRole}
-                  onChange={handleChange}
-                />
-                <Field
-                  label="Read Time"
-                  name="readTime"
-                  value={formData.readTime}
-                  onChange={handleChange}
-                  hint={`Auto: ${computedReadTime}`}
-                />
-                <Field
-                  label="Tags (comma separated)"
-                  name="tags"
-                  value={formData.tags}
-                  onChange={handleChange}
-                />
-                <Field
-                  label="Headline"
-                  name="headline"
-                  value={formData.headline}
-                  onChange={handleChange}
-                />
-                <Field
-                  label="Stat 1 Value"
-                  name="stat1Value"
-                  value={formData.stat1Value}
-                  onChange={handleChange}
-                />
-                <Field
-                  label="Stat 1 Label"
-                  name="stat1Label"
-                  value={formData.stat1Label}
-                  onChange={handleChange}
-                />
-                <Field
-                  label="Stat 2 Value"
-                  name="stat2Value"
-                  value={formData.stat2Value}
-                  onChange={handleChange}
-                />
-                <Field
-                  label="Stat 2 Label"
-                  name="stat2Label"
-                  value={formData.stat2Label}
-                  onChange={handleChange}
-                />
-                <Field
-                  label="Meta Title"
-                  name="metaTitle"
-                  value={formData.metaTitle}
-                  onChange={handleChange}
-                />
-                <Field
-                  label="Meta Description"
-                  name="metaDescription"
-                  value={formData.metaDescription}
-                  onChange={handleChange}
-                  multiline
-                />
-                <Field
-                  label="Keywords"
-                  name="keywords"
-                  value={formData.keywords}
-                  onChange={handleChange}
-                />
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <label
-                  className="text-[12px] uppercase tracking-wider text-gray-400"
-                  style={{ fontWeight: 600 }}
-                >
-                  Whitepaper Content
-                </label>
-                <div
-                  className="rounded-xl border bg-white min-h-[420px] px-1 py-2"
-                  style={{
-                    borderColor: 'rgba(0,0,0,0.08)',
-                  }}
-                >
-                  <div
-                    id="whitepaper-editor-toolbar"
-                    className="border-b mb-3 px-2 py-1.5 rounded-t-lg bg-[#fafafa]"
-                    style={{ borderColor: 'rgba(0,0,0,0.08)' }}
-                  >
-                    <span className="ql-formats">
-                      <button className="ql-header" value="1" />
-                      <button className="ql-header" value="2" />
-                      <button className="ql-header" value="3" />
-                    </span>
-                    <span className="ql-formats">
-                      <button className="ql-list" value="ordered" />
-                      <button className="ql-list" value="bullet" />
-                    </span>
-                    <span className="ql-formats">
-                      <button className="ql-divider" type="button">
-                        HR
-                      </button>
-                    </span>
-                  </div>
-                  <ReactQuill
-                    useSemanticHTML={false}
-                    theme="snow"
-                    value={formData.content}
-                    onChange={(value: string) =>
-                      setFormData((prev) => ({ ...prev, content: value }))
-                    }
-                    modules={quillModules}
-                    formats={quillFormats}
-                    placeholder="Write your whitepaper content..."
-                  />
-                </div>
-              </div>
+      {loadingData ? (
+        <p className="py-12 text-sm text-stone-500">Loading whitepaper…</p>
+      ) : (
+        <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_520px] lg:items-start">
+          <div className="space-y-5 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field
+                label="Title"
+                name="title"
+                invalid={invalidField === 'title'}
+                value={formData.title}
+                onChange={handleTitleChange}
+                placeholder="e.g. The State of AI Search 2026"
+              />
+              <Field
+                label="Slug"
+                name="slug"
+                invalid={invalidField === 'slug'}
+                value={formData.slug}
+                onChange={handleChange}
+                placeholder="generated-from-title"
+              />
+              <Field
+                label="Description"
+                name="description"
+                invalid={invalidField === 'description'}
+                value={formData.description}
+                onChange={handleChange}
+                placeholder="A short summary of the whitepaper"
+                multiline
+              />
+              <Field
+                label="Date"
+                name="date"
+                invalid={invalidField === 'date'}
+                value={formData.date}
+                onChange={handleChange}
+                type="date"
+              />
+              <Field
+                label="Author"
+                name="author"
+                invalid={invalidField === 'author'}
+                value={formData.author}
+                onChange={handleChange}
+                placeholder={FALLBACK_AUTHOR}
+              />
+              <Field
+                label="Author Role"
+                name="authorRole"
+                invalid={invalidField === 'authorRole'}
+                value={formData.authorRole}
+                onChange={handleChange}
+                placeholder={FALLBACK_AUTHOR_ROLE}
+              />
+              <Field
+                label="Read Time"
+                name="readTime"
+                invalid={invalidField === 'readTime'}
+                value={formData.readTime}
+                onChange={handleChange}
+                placeholder={computedReadTime}
+                hint={`Auto: ${computedReadTime}`}
+              />
+              <Field
+                label="Tags (comma separated)"
+                name="tags"
+                invalid={invalidField === 'tags'}
+                value={formData.tags}
+                onChange={handleChange}
+                placeholder={FALLBACK_TAGS.join(', ')}
+              />
+              <Field
+                label="Headline"
+                name="headline"
+                invalid={invalidField === 'headline'}
+                value={formData.headline}
+                onChange={handleChange}
+                placeholder="e.g. Winning visibility in AI answers"
+              />
+              <Field
+                label="Stat 1 Value"
+                name="stat1Value"
+                invalid={invalidField === 'stat1Value'}
+                value={formData.stat1Value}
+                onChange={handleChange}
+                placeholder="e.g. 68%"
+              />
+              <Field
+                label="Stat 1 Label"
+                name="stat1Label"
+                invalid={invalidField === 'stat1Label'}
+                value={formData.stat1Label}
+                onChange={handleChange}
+                placeholder="e.g. of buyers start research in AI search"
+              />
+              <Field
+                label="Stat 2 Value"
+                name="stat2Value"
+                invalid={invalidField === 'stat2Value'}
+                value={formData.stat2Value}
+                onChange={handleChange}
+                placeholder="e.g. 3x"
+              />
+              <Field
+                label="Stat 2 Label"
+                name="stat2Label"
+                invalid={invalidField === 'stat2Label'}
+                value={formData.stat2Label}
+                onChange={handleChange}
+                placeholder="e.g. more citations in AI answers"
+              />
+              <Field
+                label="Meta Title"
+                name="metaTitle"
+                invalid={invalidField === 'metaTitle'}
+                value={formData.metaTitle}
+                onChange={handleChange}
+                placeholder="Title shown in search results"
+              />
+              <Field
+                label="Meta Description"
+                name="metaDescription"
+                invalid={invalidField === 'metaDescription'}
+                value={formData.metaDescription}
+                onChange={handleChange}
+                placeholder="Description shown in search results"
+                multiline
+              />
+              <Field
+                label="Keywords"
+                name="keywords"
+                invalid={invalidField === 'keywords'}
+                value={formData.keywords}
+                onChange={handleChange}
+                placeholder="e.g. AEO, GEO, AI search"
+              />
             </div>
 
-            <aside
-              className="rounded-2xl border p-5 h-fit sticky top-24"
-              style={{
-                backgroundColor: 'rgba(255,255,255,0.7)',
-                backdropFilter: 'blur(16px)',
-                borderColor: 'rgba(0,0,0,0.06)',
-                boxShadow: '0 4px 24px rgba(0,0,0,0.03)',
-              }}
-            >
-              <div className="flex items-start justify-between gap-4 mb-4">
-                <div>
-                  <h3 className="text-sm text-gray-900" style={{ fontWeight: 600 }}>
-                    Live Whitepaper Preview
-                  </h3>
-                  <p className="text-xs text-gray-500 mt-1">
-                    This renders the same layout the public whitepaper page uses.
-                  </p>
-                </div>
-                <span
-                  className="text-[10px] uppercase tracking-[0.08em] px-2.5 py-1 rounded-full border bg-orange-50 text-orange-600"
-                  style={{ fontWeight: 700, borderColor: 'rgba(255,117,31,0.18)' }}
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wider text-stone-500">
+                Whitepaper Content
+              </label>
+              <div className="mt-2 min-h-[420px] rounded-xl border border-stone-200 bg-white p-1">
+                <div
+                  id="whitepaper-editor-toolbar"
+                  className="rounded-t-lg border-b border-stone-200 bg-stone-50 px-2 py-1.5"
                 >
-                  Preview
-                </span>
-              </div>
-
-              <div
-                className="rounded-2xl border overflow-hidden bg-white"
-                style={{
-                  borderColor: 'rgba(0,0,0,0.08)',
-                  maxHeight: 'calc(100vh - 170px)',
-                  overflowY: 'auto',
-                }}
-              >
-                <div style={{ pointerEvents: 'none' }}>
-                  <WhitepaperArticle wp={previewWhitepaper} />
+                  <span className="ql-formats">
+                    <button className="ql-header" value="1" />
+                    <button className="ql-header" value="2" />
+                    <button className="ql-header" value="3" />
+                  </span>
+                  <span className="ql-formats">
+                    <button className="ql-list" value="ordered" />
+                    <button className="ql-list" value="bullet" />
+                  </span>
+                  <span className="ql-formats">
+                    <button className="ql-divider" type="button">
+                      HR
+                    </button>
+                  </span>
                 </div>
+                <ReactQuill
+                  useSemanticHTML={false}
+                  theme="snow"
+                  value={formData.content}
+                  onChange={(value: string, _delta: unknown, source: string) => {
+                    setFormData((prev) => ({ ...prev, content: value }));
+                    if (editorBaseline.acceptsNormalisation(source)) {
+                      setSavedSnapshot((snapshot) =>
+                        JSON.stringify({ ...JSON.parse(snapshot), content: value }),
+                      );
+                    }
+                  }}
+                  modules={quillModules}
+                  formats={quillFormats}
+                  placeholder="Write your whitepaper content..."
+                />
               </div>
-
-              <div className="mt-4 text-xs text-gray-500">
-                URL:{' '}
-                <span className="text-gray-700">
-                  {site?.publicPaths.whitepapers ?? '/whitepapers'}/{formData.slug || 'your-slug'}
-                </span>
-              </div>
-            </aside>
+            </div>
           </div>
-        )}
-      </main>
-    </div>
+
+          <aside className="sticky top-6 rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
+            <div className="mb-4">
+              <h2 className="text-sm font-semibold">Live preview</h2>
+              <p className="mt-1 text-xs text-stone-500">
+                This renders the same layout the public whitepaper page uses.
+              </p>
+            </div>
+            <div className="max-h-[calc(100vh-190px)] overflow-y-auto rounded-2xl border border-stone-200 bg-white">
+              <div className="pointer-events-none">
+                <WhitepaperArticle wp={previewWhitepaper} />
+              </div>
+            </div>
+            <p className="mt-4 truncate text-xs text-stone-500">
+              URL: {site?.publicPaths.whitepapers ?? '/whitepapers'}/{formData.slug || 'your-slug'}
+            </p>
+          </aside>
+        </div>
+      )}
+      <ConfirmDialog {...leaveGuard.dialogProps} />
+    </section>
   );
 }
 
@@ -584,31 +637,36 @@ function Field({
   onChange,
   multiline = false,
   type = 'text',
+  placeholder,
   hint,
+  invalid = false,
 }: {
   label: string;
-  name: string;
+  name: keyof WhitepaperFormData;
   value: string;
   onChange: (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => void;
   multiline?: boolean;
   type?: string;
+  placeholder?: string;
   hint?: string;
+  invalid?: boolean;
 }) {
+  const maxLength = LIMITS[name];
+  const inputClass = `rounded-xl border px-3 py-2.5 text-sm font-normal normal-case tracking-normal text-stone-900 outline-none placeholder:text-stone-400 focus:ring-2 focus:ring-orange-200 ${
+    invalid ? 'border-red-500' : 'border-stone-200'
+  }`;
+
   return (
-    <div className="flex flex-col gap-1.5">
-      <label
-        className="text-[11px] uppercase tracking-wider text-gray-400"
-        style={{ fontWeight: 600 }}
-      >
-        {label}
-      </label>
+    <label className="grid gap-1.5 text-xs font-semibold uppercase tracking-wider text-stone-500">
+      {label}
       {multiline ? (
         <textarea
           name={name}
           value={value}
           onChange={onChange}
-          className="px-3 py-2.5 rounded-xl border bg-white focus:outline-none focus:ring-2 focus:ring-orange-200 text-sm min-h-[88px]"
-          style={{ borderColor: 'rgba(0,0,0,0.08)' }}
+          placeholder={placeholder}
+          maxLength={maxLength}
+          className={`${inputClass} min-h-[88px]`}
         />
       ) : (
         <input
@@ -616,12 +674,22 @@ function Field({
           name={name}
           value={value}
           onChange={onChange}
-          className="px-3 py-2.5 rounded-xl border bg-white focus:outline-none focus:ring-2 focus:ring-orange-200 text-sm"
-          style={{ borderColor: 'rgba(0,0,0,0.08)' }}
+          placeholder={placeholder}
+          maxLength={maxLength}
+          className={inputClass}
         />
       )}
-      {hint && <span className="text-[11px] text-gray-400">{hint}</span>}
-    </div>
+      {(hint || maxLength) && (
+        <span className="flex justify-between gap-2 text-[11px] font-normal normal-case tracking-normal text-stone-400">
+          <span>{hint}</span>
+          {maxLength && (
+            <span className={value.length > maxLength ? 'text-red-600' : undefined}>
+              {value.length}/{maxLength}
+            </span>
+          )}
+        </span>
+      )}
+    </label>
   );
 }
 

@@ -1,5 +1,6 @@
 import type {
   AuthorView,
+  EventView,
   FaqView,
   PostFull,
   PostSummary,
@@ -159,6 +160,12 @@ export function createCmsClient(options: ClientOptions) {
           fetchOptions,
           true,
         ),
+    },
+    events: {
+      list: (params: ListParams = {}, fetchOptions?: CmsFetchOptions) =>
+        request<ListResult<EventView>>(`/events${queryString(params)}`, fetchOptions),
+      get: (slug: string, fetchOptions?: CmsFetchOptions) =>
+        data<EventView>(`/events/${encodeURIComponent(slug)}`, fetchOptions, true),
     },
     intake: {
       faqSubmission: (

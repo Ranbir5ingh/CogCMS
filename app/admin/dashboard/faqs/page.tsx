@@ -3,8 +3,11 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import * as AlertDialog from '@radix-ui/react-alert-dialog';
 import { useSite } from '@/components/admin/site-provider';
+import { useToast } from '@/components/admin/toast-provider';
+import { TOAST_MESSAGES } from '@/components/admin/toast-messages';
+import { ConfirmDialog } from '@/components/admin/confirm-dialog';
+import { RowActionsMenu, ROW_ACTION_ITEM_CLASS } from '@/components/admin/row-actions-menu';
 import { publicUrlFor } from '@/lib/site/urls';
 
 interface FAQ {
@@ -32,6 +35,7 @@ export default function AdminFAQsList() {
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeCategory, setActiveCategory] = useState('All');
+  const { showToast } = useToast();
 
   useEffect(() => {
     Promise.all([
@@ -39,15 +43,19 @@ export default function AdminFAQsList() {
       fetch('/api/admin/faq-submissions').then((r) => r.json()),
     ])
       .then(([faqData, subData]) => {
+        if (!Array.isArray(faqData) || !Array.isArray(subData)) {
+          showToast('error', faqData?.error || TOAST_MESSAGES.faqs.listLoadFailed);
+        }
         setFaqs(Array.isArray(faqData) ? faqData : []);
         setSubmissions(Array.isArray(subData) ? subData : []);
         setLoading(false);
       })
       .catch((err) => {
         console.error(err);
+        showToast('error', TOAST_MESSAGES.faqs.listLoadFailed);
         setLoading(false);
       });
-  }, []);
+  }, [showToast]);
 
   const [deleteItem, setDeleteItem] = useState<{
     id: string;
@@ -64,6 +72,10 @@ export default function AdminFAQsList() {
         });
         if (res.ok) {
           setFaqs(faqs.filter((f) => f._id !== deleteItem.id));
+          showToast('success', TOAST_MESSAGES.faqs.deleted);
+        } else {
+          const body = await res.json().catch(() => null);
+          showToast('error', body?.error || TOAST_MESSAGES.faqs.deleteFailed);
         }
       } else if (deleteItem.type === 'submission') {
         const res = await fetch(`/api/admin/faq-submissions/${deleteItem.id}`, {
@@ -72,10 +84,20 @@ export default function AdminFAQsList() {
         });
         if (res.ok) {
           setSubmissions(submissions.filter((s) => s._id !== deleteItem.id));
+          showToast('success', TOAST_MESSAGES.faqs.submissionDeleted);
+        } else {
+          const body = await res.json().catch(() => null);
+          showToast('error', body?.error || TOAST_MESSAGES.faqs.submissionDeleteFailed);
         }
       }
     } catch (err) {
       console.error(err);
+      showToast(
+        'error',
+        deleteItem.type === 'faq'
+          ? TOAST_MESSAGES.faqs.deleteFailed
+          : TOAST_MESSAGES.faqs.submissionDeleteFailed,
+      );
     } finally {
       setDeleteItem(null);
     }
@@ -192,38 +214,40 @@ export default function AdminFAQsList() {
                         {faq.category}
                       </span>
                     </div>
-                    <h3 className="text-base text-[#1a1a1a] mb-1" style={{ fontWeight: 600 }}>
+                    <h3
+                      className="text-base text-[#1a1a1a] mb-1 line-clamp-2"
+                      style={{ fontWeight: 600 }}
+                    >
                       {faq.question}
                     </h3>
                     <p className="text-xs text-gray-400 line-clamp-2">{faq.answer}</p>
                   </div>
-                  <div className="flex gap-2 shrink-0 mt-1">
-                    {site && (
-                      <a
-                        href={publicUrlFor(site, 'faq')}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="px-3 py-1.5 text-xs border rounded-lg hover:bg-blue-50 transition-colors"
-                        style={{
-                          borderColor: 'rgba(59,130,246,0.2)',
-                          color: '#3b82f6',
-                          fontWeight: 500,
-                        }}
+                  <div className="shrink-0 mt-1">
+                    <RowActionsMenu label={`Actions for FAQ: ${faq.question}`}>
+                      <Link
+                        href={`/admin/dashboard/faqs/new?id=${faq._id}`}
+                        className={ROW_ACTION_ITEM_CLASS}
                       >
-                        View
-                      </a>
-                    )}
-                    <button
-                      onClick={() => setDeleteItem({ id: faq._id, type: 'faq' })}
-                      className="px-3 py-1.5 text-xs border rounded-lg hover:bg-red-50 hover:text-red-600 transition-colors"
-                      style={{
-                        borderColor: 'rgba(239,68,68,0.2)',
-                        color: '#ef4444',
-                        fontWeight: 500,
-                      }}
-                    >
-                      Delete
-                    </button>
+                        Edit
+                      </Link>
+                      {site && (
+                        <a
+                          href={publicUrlFor(site, 'faq')}
+                          target="_blank"
+                          rel="noreferrer"
+                          className={ROW_ACTION_ITEM_CLASS}
+                        >
+                          View
+                        </a>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setDeleteItem({ id: faq._id, type: 'faq' })}
+                        className={ROW_ACTION_ITEM_CLASS}
+                      >
+                        Delete
+                      </button>
+                    </RowActionsMenu>
                   </div>
                 </div>
               ))}
@@ -297,7 +321,10 @@ export default function AdminFAQsList() {
                           <span className="text-[11px] text-gray-300">({sub.email})</span>
                         )}
                       </div>
-                      <h3 className="text-base text-[#1a1a1a] mb-1" style={{ fontWeight: 600 }}>
+                      <h3
+                        className="text-base text-[#1a1a1a] mb-1 line-clamp-2"
+                        style={{ fontWeight: 600 }}
+                      >
                         {sub.question}
                       </h3>
                       <p className="text-[11px] text-gray-300">
@@ -310,58 +337,53 @@ export default function AdminFAQsList() {
                         })}
                       </p>
                     </div>
-                    <div className="flex gap-2 shrink-0 mt-1">
-                      <Link
-                        href={`/admin/dashboard/faqs/new?question=${encodeURIComponent(sub.question)}`}
-                        className="px-3 py-1.5 text-xs border rounded-lg hover:bg-green-50 transition-colors"
-                        style={{
-                          borderColor: 'rgba(34,197,94,0.2)',
-                          color: '#22c55e',
-                          fontWeight: 500,
-                        }}
-                        onClick={async () => {
-                          await fetch(`/api/admin/faq-submissions/${sub._id}`, {
-                            method: 'PATCH',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ status: 'answered' }),
-                          });
-                        }}
-                      >
-                        Create FAQ
-                      </Link>
-                      <button
-                        onClick={async () => {
-                          await fetch(`/api/admin/faq-submissions/${sub._id}`, {
-                            method: 'PATCH',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ status: 'dismissed' }),
-                          });
-                          setSubmissions((prev) =>
-                            prev.map((s) =>
-                              s._id === sub._id ? { ...s, status: 'dismissed' } : s,
-                            ),
-                          );
-                        }}
-                        className="px-3 py-1.5 text-xs border rounded-lg hover:bg-gray-50 transition-colors"
-                        style={{
-                          borderColor: 'rgba(0,0,0,0.08)',
-                          color: '#999',
-                          fontWeight: 500,
-                        }}
-                      >
-                        Dismiss
-                      </button>
-                      <button
-                        onClick={() => setDeleteItem({ id: sub._id, type: 'submission' })}
-                        className="px-3 py-1.5 text-xs border rounded-lg hover:bg-red-50 hover:text-red-600 transition-colors"
-                        style={{
-                          borderColor: 'rgba(239,68,68,0.2)',
-                          color: '#ef4444',
-                          fontWeight: 500,
-                        }}
-                      >
-                        Delete
-                      </button>
+                    <div className="shrink-0 mt-1">
+                      <RowActionsMenu label={`Actions for submission: ${sub.question}`}>
+                        <Link
+                          href={`/admin/dashboard/faqs/new?question=${encodeURIComponent(sub.question)}`}
+                          className={ROW_ACTION_ITEM_CLASS}
+                          onClick={async () => {
+                            const res = await fetch(`/api/admin/faq-submissions/${sub._id}`, {
+                              method: 'PATCH',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ status: 'answered' }),
+                            });
+                            if (!res.ok)
+                              showToast('error', TOAST_MESSAGES.faqs.submissionUpdateFailed);
+                          }}
+                        >
+                          Create FAQ
+                        </Link>
+                        <button
+                          onClick={async () => {
+                            const res = await fetch(`/api/admin/faq-submissions/${sub._id}`, {
+                              method: 'PATCH',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ status: 'dismissed' }),
+                            });
+                            if (!res.ok) {
+                              showToast('error', TOAST_MESSAGES.faqs.submissionUpdateFailed);
+                              return;
+                            }
+                            setSubmissions((prev) =>
+                              prev.map((s) =>
+                                s._id === sub._id ? { ...s, status: 'dismissed' } : s,
+                              ),
+                            );
+                            showToast('success', TOAST_MESSAGES.faqs.submissionDismissed);
+                          }}
+                          className={ROW_ACTION_ITEM_CLASS}
+                        >
+                          Dismiss
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeleteItem({ id: sub._id, type: 'submission' })}
+                          className={ROW_ACTION_ITEM_CLASS}
+                        >
+                          Delete
+                        </button>
+                      </RowActionsMenu>
                     </div>
                   </div>
                 ))}
@@ -371,56 +393,13 @@ export default function AdminFAQsList() {
       </div>
 
       {/* Premium Alert Dialog for Deletion */}
-      <AlertDialog.Root open={!!deleteItem} onOpenChange={(open) => !open && setDeleteItem(null)}>
-        <AlertDialog.Portal>
-          <AlertDialog.Overlay className="fixed inset-0 z-[100] bg-black/30 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
-          <AlertDialog.Content
-            className="fixed left-[50%] top-[50%] z-[100] grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-white p-8 shadow-2xl sm:rounded-3xl duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%]"
-            style={{ borderColor: 'rgba(0,0,0,0.08)' }}
-          >
-            <div className="flex flex-col gap-3 text-center sm:text-left">
-              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-red-100 sm:mx-0">
-                <svg
-                  className="h-8 w-8 text-red-600"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  strokeWidth="1.5"
-                  stroke="currentColor"
-                  aria-hidden="true"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                  />
-                </svg>
-              </div>
-              <AlertDialog.Title className="text-xl font-semibold text-gray-900 mt-2 tracking-tight">
-                {deleteItem?.type === 'faq' ? 'Delete this FAQ?' : 'Delete this question?'}
-              </AlertDialog.Title>
-              <AlertDialog.Description className="text-sm text-gray-500 leading-relaxed font-medium">
-                Are you absolutely sure? This action cannot be undone and will permanently remove
-                this item from your database.
-              </AlertDialog.Description>
-            </div>
-            <div className="flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-3 mt-4">
-              <AlertDialog.Cancel asChild>
-                <button className="mt-3 inline-flex w-full justify-center rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:mt-0 sm:w-auto transition-colors">
-                  Cancel
-                </button>
-              </AlertDialog.Cancel>
-              <AlertDialog.Action asChild>
-                <button
-                  onClick={confirmDelete}
-                  className="inline-flex w-full justify-center rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-red-500 sm:w-auto transition-colors"
-                >
-                  Yes, delete it
-                </button>
-              </AlertDialog.Action>
-            </div>
-          </AlertDialog.Content>
-        </AlertDialog.Portal>
-      </AlertDialog.Root>
+      <ConfirmDialog
+        open={!!deleteItem}
+        onOpenChange={(open) => !open && setDeleteItem(null)}
+        onConfirm={confirmDelete}
+        title={deleteItem?.type === 'faq' ? 'Delete this FAQ?' : 'Delete this question?'}
+        description="Are you absolutely sure? This action cannot be undone and will permanently remove this item from your database."
+      />
     </div>
   );
 }

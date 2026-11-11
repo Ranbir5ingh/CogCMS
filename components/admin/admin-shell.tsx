@@ -41,16 +41,17 @@ export function AdminShell({
           <SiteSwitcher sites={sites} currentSite={currentSite} />
 
           <AdminNavigation isAdmin={user.role === 'admin'} hasSite={Boolean(currentSite)}>
-            <div className="mt-6 border-t border-stone-200 pt-4 lg:mt-auto">
-              <p className="truncate text-sm font-medium">{user.name}</p>
-              <p className="truncate text-xs text-stone-500">{user.email}</p>
-              <ChangePasswordForm />
-              <form action={logoutFromDashboardAction} className="mt-3">
-                <button className="w-full rounded-lg border border-stone-200 px-3 py-2 text-left text-sm font-medium text-stone-700 transition hover:bg-stone-50 active:translate-y-px">
-                  Sign out
-                </button>
-              </form>
-            </div>
+            <details className="mt-auto group border-t border-stone-200 pt-4">
+              <summary className="flex cursor-pointer list-none items-center gap-3 rounded-xl p-2 hover:bg-stone-50">
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-orange-100 text-sm font-semibold text-orange-700">{user.name.charAt(0).toUpperCase()}</span>
+                <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{user.name}</span><span className="block truncate text-xs text-stone-500">{user.email}</span></span>
+                <span className="text-stone-400 transition group-open:rotate-180">⌄</span>
+              </summary>
+              <div className="mt-2 rounded-xl border border-stone-200 bg-stone-50 p-2">
+                <ChangePasswordForm />
+                <form action={logoutFromDashboardAction} className="mt-2"><button className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-left text-sm font-medium text-stone-700 transition hover:bg-stone-100">Logout</button></form>
+              </div>
+            </details>
           </AdminNavigation>
         </div>
       </aside>

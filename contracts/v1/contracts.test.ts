@@ -22,6 +22,22 @@ describe('v1 output contracts', () => {
         updatedAt: '2026-09-03T00:00:00.000Z',
       }),
     ).toMatchObject({ id: 'site-1', mediaBaseUrl: null });
+    expect(
+      postSummarySchema.parse({
+        id: 'post-1',
+        title: 'Post',
+        slug: 'post',
+        excerpt: '',
+        imageUrl: 'https://cdn.example.com/cover.jpg',
+        imageAlt: 'Dashboard showing AI citation share',
+        tag: '',
+        category: '',
+        tags: [],
+        isFeatured: false,
+        publishedAt: '2026-09-03T00:00:00.000Z',
+        updatedAt: '2026-09-03T00:00:00.000Z',
+      }),
+    ).toMatchObject({ imageAlt: 'Dashboard showing AI citation share' });
   });
 
   it('rejects internal tenant and database fields rather than silently stripping them', () => {
@@ -43,6 +59,7 @@ describe('v1 output contracts', () => {
         slug: 'post',
         excerpt: '',
         imageUrl: '',
+        imageAlt: '',
         tag: '',
         category: '',
         tags: [],

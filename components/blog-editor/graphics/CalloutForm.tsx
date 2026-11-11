@@ -23,7 +23,9 @@ export default function CalloutForm({
           className="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-orange-200"
           style={{ borderColor: 'rgba(0,0,0,0.12)' }}
           value={value.variant}
-          onChange={(e) => onChange({ ...value, variant: e.target.value as CalloutConfig['variant'] })}
+          onChange={(e) =>
+            onChange({ ...value, variant: e.target.value as CalloutConfig['variant'] })
+          }
         >
           <option value="quote">Quote (italic)</option>
           <option value="info">Info</option>
@@ -41,6 +43,7 @@ export default function CalloutForm({
         value={value.text}
         onChange={(v) => onChange({ ...value, text: v })}
         textarea
+        placeholder="A short, quotable statement worth highlighting."
       />
       <TextField
         label="Attribution (optional)"

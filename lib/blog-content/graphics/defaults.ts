@@ -1,12 +1,10 @@
-import type {
-  GraphicType,
-  StatCardsConfig,
-  CalloutConfig,
-  ComparisonConfig,
-} from './types';
+import type { GraphicType, StatCardsConfig, CalloutConfig, ComparisonConfig } from './types';
 
 /* Starter configs for the insert flow — a fresh object per call so each inserted
-   graphic owns its state. Authors then edit the values in the form. */
+   graphic owns its state. Text fields start empty so the author types into a blank
+   field instead of clearing sample copy; the sample wording lives in the form
+   placeholders. Numbers start as NaN, which zod rejects, so a stat card cannot be
+   saved until a real figure is entered. */
 
 const BRAND = '#FF751F';
 
@@ -19,16 +17,16 @@ export const GRAPHIC_DEFAULTS: {
     type: 'stat-cards',
     animate: true,
     cards: [
-      { number: 250, suffix: 'B+', label: 'Label one', barColor: BRAND, caption: 'Short supporting line.' },
-      { number: 13, suffix: 'T', label: 'Label two', barColor: BRAND, caption: 'Short supporting line.' },
-      { prefix: '$', number: 100, suffix: 'M+', label: 'Label three', barColor: BRAND, caption: 'Short supporting line.' },
+      { number: Number.NaN, label: '', barColor: BRAND, caption: '' },
+      { number: Number.NaN, label: '', barColor: BRAND, caption: '' },
+      { number: Number.NaN, label: '', barColor: BRAND, caption: '' },
     ],
   }),
   callout: () => ({
     type: 'callout',
     animate: true,
     eyebrow: '',
-    text: 'A short, quotable statement worth highlighting.',
+    text: '',
     attribution: '',
     accentColor: BRAND,
     variant: 'quote',
@@ -38,8 +36,8 @@ export const GRAPHIC_DEFAULTS: {
     animate: true,
     accentColor: BRAND,
     columns: [
-      { heading: 'Before', points: ['First point', 'Second point'] },
-      { heading: 'After', points: ['First point', 'Second point'] },
+      { heading: '', points: ['', ''] },
+      { heading: '', points: ['', ''] },
     ],
   }),
 };

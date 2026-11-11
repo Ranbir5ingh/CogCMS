@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useToast } from '@/components/admin/toast-provider';
+import { TOAST_MESSAGES } from '@/components/admin/toast-messages';
 
 type BlogOpt = { slug: string; title: string };
 
@@ -15,12 +17,19 @@ export default function RelatedPicker({
 }) {
   const [blogs, setBlogs] = useState<BlogOpt[]>([]);
   const [q, setQ] = useState('');
+  const { showToast } = useToast();
   useEffect(() => {
     fetch('/api/admin/blogs')
       .then((r) => r.json())
-      .then((d) => Array.isArray(d) && setBlogs(d.map((b: any) => ({ slug: b.slug, title: b.title }))))
-      .catch(() => {});
-  }, []);
+      .then((d) => {
+        if (Array.isArray(d)) {
+          setBlogs(d.map((b: any) => ({ slug: b.slug, title: b.title })));
+          return;
+        }
+        showToast('error', d?.error || TOAST_MESSAGES.blogEditor.relatedLoadFailed);
+      })
+      .catch(() => showToast('error', TOAST_MESSAGES.blogEditor.relatedLoadFailed));
+  }, [showToast]);
   const matches = blogs
     .filter((b) => b.slug !== currentSlug && !value.includes(b.slug))
     .filter((b) => b.title.toLowerCase().includes(q.toLowerCase()))

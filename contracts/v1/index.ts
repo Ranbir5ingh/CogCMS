@@ -6,3 +6,4 @@ export * from '@/contracts/v1/faq';
 export * from '@/contracts/v1/whitepaper';
 export * from '@/contracts/v1/release-note';
 export * from '@/contracts/v1/intake';
+export * from './event';

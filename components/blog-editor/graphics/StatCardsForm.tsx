@@ -1,7 +1,7 @@
 'use client';
 
 import type { StatCardsConfig } from '@/lib/blog-content/graphics/types';
-import { Field, TextField, NumberField, ColorField, Toggle, RowButton } from './controls';
+import { TextField, NumberField, ColorField, Toggle, RowButton, RemoveButton } from './controls';
 
 export default function StatCardsForm({
   value,
@@ -11,13 +11,16 @@ export default function StatCardsForm({
   onChange: (c: StatCardsConfig) => void;
 }) {
   const patchCard = (i: number, patch: Partial<StatCardsConfig['cards'][number]>) =>
-    onChange({ ...value, cards: value.cards.map((c, idx) => (idx === i ? { ...c, ...patch } : c)) });
+    onChange({
+      ...value,
+      cards: value.cards.map((c, idx) => (idx === i ? { ...c, ...patch } : c)),
+    });
 
   const addCard = () => {
     if (value.cards.length >= 4) return;
     onChange({
       ...value,
-      cards: [...value.cards, { number: 0, label: 'New stat', barColor: '#FF751F', caption: '' }],
+      cards: [...value.cards, { number: Number.NaN, label: '', barColor: '#FF751F', caption: '' }],
     });
   };
 
@@ -42,16 +45,50 @@ export default function StatCardsForm({
         >
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] font-semibold text-gray-500">Card {i + 1}</span>
-            <RowButton label="Remove" danger onClick={() => removeCard(i)} disabled={value.cards.length <= 2} />
+            <RemoveButton
+              label={`Remove card ${i + 1}`}
+              onClick={() => removeCard(i)}
+              disabled={value.cards.length <= 2}
+            />
           </div>
           <div className="grid grid-cols-3 gap-2">
-            <TextField label="Prefix" value={card.prefix ?? ''} onChange={(v) => patchCard(i, { prefix: v })} placeholder="$" />
-            <NumberField label="Number" value={card.number} onChange={(v) => patchCard(i, { number: v })} />
-            <TextField label="Suffix" value={card.suffix ?? ''} onChange={(v) => patchCard(i, { suffix: v })} placeholder="M+" />
+            <TextField
+              label="Prefix"
+              value={card.prefix ?? ''}
+              onChange={(v) => patchCard(i, { prefix: v })}
+              placeholder="$"
+            />
+            <NumberField
+              label="Number"
+              value={card.number}
+              onChange={(v) => patchCard(i, { number: v })}
+              placeholder="250"
+            />
+            <TextField
+              label="Suffix"
+              value={card.suffix ?? ''}
+              onChange={(v) => patchCard(i, { suffix: v })}
+              placeholder="M+"
+            />
           </div>
-          <TextField label="Label" value={card.label} onChange={(v) => patchCard(i, { label: v })} />
-          <TextField label="Caption" value={card.caption ?? ''} onChange={(v) => patchCard(i, { caption: v })} textarea />
-          <ColorField label="Bar color" value={card.barColor} onChange={(v) => patchCard(i, { barColor: v })} />
+          <TextField
+            label="Label"
+            value={card.label}
+            onChange={(v) => patchCard(i, { label: v })}
+            placeholder="Annual revenue"
+          />
+          <TextField
+            label="Caption"
+            value={card.caption ?? ''}
+            onChange={(v) => patchCard(i, { caption: v })}
+            textarea
+            placeholder="Short supporting line."
+          />
+          <ColorField
+            label="Bar color"
+            value={card.barColor}
+            onChange={(v) => patchCard(i, { barColor: v })}
+          />
         </div>
       ))}
 

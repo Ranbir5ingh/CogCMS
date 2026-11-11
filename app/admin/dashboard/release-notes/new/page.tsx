@@ -3,9 +3,11 @@
 import { Suspense, useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import 'react-quill-new/dist/quill.snow.css';
 import { useSite } from '@/components/admin/site-provider';
+import { useToast } from '@/components/admin/toast-provider';
+import { TOAST_MESSAGES } from '@/components/admin/toast-messages';
 import { ReleaseNoteCard } from '@/components/preview/release-note-card';
 import {
   buildReleaseNoteMarkdown,
@@ -14,6 +16,9 @@ import {
 } from '@/lib/release-notes-parser';
 import { editorHtmlToMarkdown, markdownToEditorHtml } from '@/lib/release-notes-editor';
 import { publicUrlFor } from '@/lib/site/urls';
+import { ConfirmDialog } from '@/components/admin/confirm-dialog';
+import { makeFormStateKey, useSessionFormState } from '@/lib/admin/session-form-state';
+import { useLeaveGuard } from '@/lib/admin/use-leave-guard';
 
 const ReactQuill = dynamic(() => import('react-quill-new'), { ssr: false });
 
@@ -30,6 +35,14 @@ const DEFAULT_BODY = `This release introduces improvements across the platform.
 
 - List reliability improvements`;
 
+const EMPTY_BODY_HTML = '<h2><br></h2>';
+
+// Compared as Markdown with blank lines collapsed: Quill re-serialises loaded
+// HTML, so the raw editor HTML can change without any edit by the user.
+function releaseNoteSnapshot(version: string, date: string, bodyMarkdown: string): string {
+  return JSON.stringify({ version, date, body: bodyMarkdown.replace(/\n+/g, '\n').trim() });
+}
+
 function todayDateInput(): string {
   const today = new Date();
   const year = today.getFullYear();
@@ -39,22 +52,25 @@ function todayDateInput(): string {
 }
 
 function ReleaseNoteEditor() {
-  const router = useRouter();
   const search = useSearchParams();
   const site = useSite();
   const editSlug = search.get('slug');
   const [originalSlug, setOriginalSlug] = useState<string | null>(editSlug);
   const [version, setVersion] = useState('');
   const [date, setDate] = useState(todayDateInput);
-  const [bodyHtml, setBodyHtml] = useState(markdownToEditorHtml(DEFAULT_BODY));
+  const [bodyHtml, setBodyHtml] = useState(EMPTY_BODY_HTML);
   const [loading, setLoading] = useState(Boolean(editSlug));
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [savedSnapshot, setSavedSnapshot] = useState(() =>
+    releaseNoteSnapshot('', todayDateInput(), ''),
+  );
+  const { showToast } = useToast();
 
   useEffect(() => {
     if (!editSlug || !site?.id) {
       setOriginalSlug(null);
       setLoading(false);
+      setSavedSnapshot(releaseNoteSnapshot('', todayDateInput(), ''));
       return;
     }
 
@@ -62,32 +78,55 @@ function ReleaseNoteEditor() {
     setOriginalSlug(editSlug);
     setVersion('');
     setDate(todayDateInput());
-    setBodyHtml(markdownToEditorHtml(DEFAULT_BODY));
+    setBodyHtml(EMPTY_BODY_HTML);
     setLoading(true);
-    setError(null);
     fetch(`/api/admin/release-notes/${encodeURIComponent(editSlug)}`, {
       cache: 'no-store',
       signal: controller.signal,
     })
       .then(async (response) => {
         const note = await response.json();
-        if (!response.ok) throw new Error(note.error || 'Could not load release note.');
+        if (!response.ok) throw new Error(note.error || TOAST_MESSAGES.releaseNotes.loadFailed);
         setVersion(note.version || '');
         setDate(note.dateInput || todayDateInput());
-        setBodyHtml(markdownToEditorHtml(note.bodyMarkdown || DEFAULT_BODY));
+        setBodyHtml(markdownToEditorHtml(note.bodyMarkdown || ''));
         setOriginalSlug(note.slug);
+        setSavedSnapshot(
+          releaseNoteSnapshot(
+            note.version || '',
+            note.dateInput || todayDateInput(),
+            editorHtmlToMarkdown(markdownToEditorHtml(note.bodyMarkdown || '')),
+          ),
+        );
       })
       .catch((reason) => {
         if (reason instanceof DOMException && reason.name === 'AbortError') return;
-        setError(reason instanceof Error ? reason.message : 'Could not load release note.');
+        showToast(
+          'error',
+          reason instanceof Error ? reason.message : TOAST_MESSAGES.releaseNotes.loadFailed,
+        );
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [editSlug, site?.id]);
+  }, [editSlug, site?.id, showToast]);
 
   const bodyMarkdown = useMemo(() => editorHtmlToMarkdown(bodyHtml), [bodyHtml]);
+  const isDirty = releaseNoteSnapshot(version, date, bodyMarkdown) !== savedSnapshot;
+  const editorState = useMemo(() => ({ version, date, bodyHtml }), [version, date, bodyHtml]);
+  const { clear: clearFormState } = useSessionFormState({
+    storageKey: site?.id ? makeFormStateKey(site.id, 'release-note', editSlug) : null,
+    value: editorState,
+    isDirty,
+    ready: !loading,
+    onRestore: (saved) => {
+      if (typeof saved.version === 'string') setVersion(saved.version);
+      if (typeof saved.date === 'string') setDate(saved.date);
+      if (typeof saved.bodyHtml === 'string') setBodyHtml(saved.bodyHtml);
+    },
+  });
+  const leaveGuard = useLeaveGuard(isDirty, clearFormState);
   const preview = useMemo(() => {
     const dateLabel = formatHumanDateFromInput(date) || 'January 1, 2026';
     return parseReleaseNoteFile(
@@ -99,11 +138,10 @@ function ReleaseNoteEditor() {
 
   async function save(status: 'draft' | 'publish') {
     if (!version.trim() || !date || !bodyMarkdown.trim()) {
-      setError('Version, date, and content are required.');
+      showToast('error', TOAST_MESSAGES.releaseNotes.fieldsRequired);
       return;
     }
     setSaving(true);
-    setError(null);
     try {
       const endpoint = originalSlug
         ? `/api/admin/release-notes/${encodeURIComponent(originalSlug)}`
@@ -114,10 +152,22 @@ function ReleaseNoteEditor() {
         body: JSON.stringify({ version, date, bodyMarkdown, status }),
       });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'Could not save release note.');
-      router.push('/admin/dashboard/release-notes');
+      if (!response.ok) throw new Error(result.error || TOAST_MESSAGES.releaseNotes.saveFailed);
+      showToast(
+        'success',
+        status === 'publish'
+          ? originalSlug
+            ? TOAST_MESSAGES.releaseNotes.republished
+            : TOAST_MESSAGES.releaseNotes.published
+          : TOAST_MESSAGES.releaseNotes.draftSaved,
+      );
+      clearFormState();
+      leaveGuard.leaveTo('/admin/dashboard/release-notes');
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Could not save release note.');
+      showToast(
+        'error',
+        reason instanceof Error ? reason.message : TOAST_MESSAGES.releaseNotes.saveFailed,
+      );
     } finally {
       setSaving(false);
     }
@@ -159,11 +209,6 @@ function ReleaseNoteEditor() {
         </div>
       </div>
 
-      {error ? (
-        <p className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          {error}
-        </p>
-      ) : null}
       {loading ? (
         <p className="py-12 text-sm text-stone-500">Loading release note…</p>
       ) : (
@@ -189,7 +234,7 @@ function ReleaseNoteEditor() {
               <label className="text-xs font-semibold uppercase tracking-wider text-stone-500">
                 Content
               </label>
-              <div className="mt-2 min-h-[420px] rounded-xl border border-stone-200 bg-white p-1">
+              <div className="mt-2 min-h-[420px] rounded-xl border border-stone-200 bg-white p-1 [&_.ql-editor>h2:only-child:has(>br:only-child)]:before:pointer-events-none [&_.ql-editor>h2:only-child:has(>br:only-child)]:before:absolute [&_.ql-editor>h2:only-child:has(>br:only-child)]:before:font-normal [&_.ql-editor>h2:only-child:has(>br:only-child)]:before:text-stone-400 [&_.ql-editor>h2:only-child:has(>br:only-child)]:before:content-['Section_title,_e.g._New_Features']">
                 <div
                   id="release-note-toolbar"
                   className="rounded-t-lg border-b border-stone-200 bg-stone-50 px-2 py-1.5"
@@ -244,6 +289,7 @@ function ReleaseNoteEditor() {
           </aside>
         </div>
       )}
+      <ConfirmDialog {...leaveGuard.dialogProps} />
     </section>
   );
 }

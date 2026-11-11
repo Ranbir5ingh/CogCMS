@@ -2,8 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import * as AlertDialog from '@radix-ui/react-alert-dialog';
 import { useSite } from '@/components/admin/site-provider';
+import { useToast } from '@/components/admin/toast-provider';
+import { TOAST_MESSAGES } from '@/components/admin/toast-messages';
+import { ConfirmDialog } from '@/components/admin/confirm-dialog';
+import { RowActionsMenu, ROW_ACTION_ITEM_CLASS } from '@/components/admin/row-actions-menu';
 import { publicUrlFor } from '@/lib/site/urls';
 
 interface Blog {
@@ -24,8 +27,7 @@ export default function AdminBlogsList() {
   const [filter, setFilter] = useState('all');
   const [blogToDelete, setBlogToDelete] = useState<Blog | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [deleteError, setDeleteError] = useState('');
-  const [notice, setNotice] = useState('');
+  const { showToast } = useToast();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -41,15 +43,16 @@ export default function AdminBlogsList() {
         }
       })
       .catch(() => {
-        if (!controller.signal.aborted) setState('error');
+        if (controller.signal.aborted) return;
+        setState('error');
+        showToast('error', TOAST_MESSAGES.blogs.listLoadFailed);
       });
     return () => controller.abort();
-  }, [attempt]);
+  }, [attempt, showToast]);
 
   async function confirmDelete() {
     if (!blogToDelete || deleting) return;
     setDeleting(true);
-    setDeleteError('');
     try {
       const response = await fetch(`/api/admin/blogs/${encodeURIComponent(blogToDelete.slug)}`, {
         method: 'DELETE',
@@ -57,10 +60,10 @@ export default function AdminBlogsList() {
       });
       if (!response.ok) throw new Error('Delete failed');
       setBlogs((current) => current.filter((blog) => blog._id !== blogToDelete._id));
-      setNotice(`“${blogToDelete.title}” was deleted.`);
+      showToast('success', TOAST_MESSAGES.blogs.deleted);
       setBlogToDelete(null);
     } catch {
-      setDeleteError('The post could not be deleted. It is still in your list. Try again.');
+      showToast('error', TOAST_MESSAGES.blogs.deleteFailed);
     } finally {
       setDeleting(false);
     }
@@ -115,7 +118,6 @@ export default function AdminBlogsList() {
       </div>
       <p role="status" className="my-4 text-sm text-stone-600">
         {state === 'ready' ? `${visible.length} of ${blogs.length} posts` : ''}
-        {notice ? ` · ${notice}` : ''}
       </p>
       <div className="overflow-hidden rounded-xl border border-stone-200 bg-white">
         {state === 'loading' ? (
@@ -198,11 +200,10 @@ export default function AdminBlogsList() {
                     </time>
                   </div>
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
+                <RowActionsMenu label={`Actions for ${blog.title}`}>
                   <Link
                     href={`/admin/dashboard/blogs/new?slug=${encodeURIComponent(blog.slug)}`}
-                    aria-label={`Edit ${blog.title}`}
-                    className="rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium hover:bg-stone-100"
+                    className={ROW_ACTION_ITEM_CLASS}
                   >
                     Edit
                   </Link>
@@ -211,70 +212,32 @@ export default function AdminBlogsList() {
                       href={publicUrlFor(site, 'blogs', blog.slug)}
                       target="_blank"
                       rel="noreferrer"
-                      aria-label={`View ${blog.title} on public site`}
-                      className="rounded-lg px-3 py-2 text-sm font-medium text-stone-700 hover:bg-stone-100"
+                      className={ROW_ACTION_ITEM_CLASS}
                     >
-                      View ↗
+                      View
                     </a>
                   ) : null}
                   <button
                     type="button"
-                    aria-label={`Delete ${blog.title}`}
-                    onClick={() => {
-                      setDeleteError('');
-                      setBlogToDelete(blog);
-                    }}
-                    className="rounded-lg px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50"
+                    onClick={() => setBlogToDelete(blog)}
+                    className={ROW_ACTION_ITEM_CLASS}
                   >
                     Delete
                   </button>
-                </div>
+                </RowActionsMenu>
               </div>
             ))
           : null}
       </div>
-      <AlertDialog.Root
+      <ConfirmDialog
         open={Boolean(blogToDelete)}
         onOpenChange={(open) => {
           if (!open && !deleting) setBlogToDelete(null);
         }}
-      >
-        <AlertDialog.Portal>
-          <AlertDialog.Overlay className="fixed inset-0 z-40 bg-black/40" />
-          <AlertDialog.Content className="fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border border-stone-200 bg-white p-6 shadow-xl">
-            <AlertDialog.Title className="text-lg font-semibold">
-              Delete this blog post?
-            </AlertDialog.Title>
-            <AlertDialog.Description className="mt-3 break-words text-sm leading-6 text-stone-600">
-              “{blogToDelete?.title}” will be permanently removed from the CMS. To take it offline
-              while keeping a copy, change its status to draft in the editor.
-            </AlertDialog.Description>
-            {deleteError ? (
-              <p role="alert" className="mt-4 text-sm text-red-700">
-                {deleteError}
-              </p>
-            ) : null}
-            <div className="mt-6 flex justify-end gap-3">
-              <AlertDialog.Cancel asChild>
-                <button
-                  disabled={deleting}
-                  className="rounded-lg border border-stone-300 px-4 py-2 text-sm font-medium disabled:opacity-60"
-                >
-                  Cancel
-                </button>
-              </AlertDialog.Cancel>
-              <button
-                type="button"
-                onClick={confirmDelete}
-                disabled={deleting}
-                className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white hover:bg-red-800 disabled:opacity-60"
-              >
-                {deleting ? 'Deleting…' : 'Delete post'}
-              </button>
-            </div>
-          </AlertDialog.Content>
-        </AlertDialog.Portal>
-      </AlertDialog.Root>
+        onConfirm={confirmDelete}
+        title="Delete this blog post?"
+        description={`“${blogToDelete?.title ?? ''}” will be permanently removed from the CMS. To take it offline while keeping a copy, change its status to draft in the editor.`}
+      />
     </section>
   );
 }

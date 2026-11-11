@@ -10,6 +10,7 @@ export interface IBlog extends Document<Types.ObjectId> {
   excerpt: string;
   content: string;
   imageUrl: string;
+  imageAlt: string;
   tag?: string;
   authorId: Types.ObjectId | null;
   category?: string;
@@ -61,6 +62,7 @@ const BlogSchema = new Schema<IBlog>(
     excerpt: { type: String, default: '' },
     content: { type: String, required: true },
     imageUrl: { type: String, default: '' },
+    imageAlt: { type: String, default: '' },
     tag: { type: String, default: 'Insights' },
     authorId: { type: Schema.Types.ObjectId, ref: 'Author', default: null },
     category: { type: String, default: '' },

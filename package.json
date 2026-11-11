@@ -12,6 +12,7 @@
     "test:unit": "node scripts/run-vitest.mjs run --project unit",
     "test:integration": "node scripts/run-vitest.mjs run --project integration",
     "test:watch": "node scripts/run-vitest.mjs",
+    "test:e2e": "playwright test",
     "seed:admin": "tsx --env-file-if-exists=.env scripts/seed-admin.ts",
     "seed:demo": "tsx --env-file-if-exists=.env scripts/seed-demo.ts",
     "ensure:indexes": "tsx --env-file-if-exists=.env scripts/ensure-indexes.ts",
@@ -44,6 +45,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4.1.12",
     "@types/node": "^25.3.2",
     "@types/react": "^19.2.14",

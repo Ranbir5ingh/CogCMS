@@ -21,3 +21,19 @@ describe('public blog card description', () => {
     },
   );
 });
+
+describe('public blog cover image alt text', () => {
+  it.each([
+    ['A team reviewing an AI visibility report', 'A team reviewing an AI visibility report'],
+    [undefined, ''],
+  ])('serializes imageAlt %j as %j', (imageAlt, expected) => {
+    const post = new Blog({
+      title: 'Test post',
+      slug: 'test-post',
+      imageUrl: 'https://cdn.example.com/cover.jpg',
+      imageAlt,
+      updatedAt: new Date('2026-09-01T00:00:00.000Z'),
+    });
+    expect(serializePostSummary(post).imageAlt).toBe(expected);
+  });
+});

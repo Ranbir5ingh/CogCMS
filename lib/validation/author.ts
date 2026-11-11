@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   optionalTextSchema,
+  optionalUrlSchema,
   publicationStatusSchema,
   requiredTextSchema,
   slugSchema,
@@ -12,7 +13,7 @@ export const authorInputSchema = z
     slug: slugSchema,
     role: optionalTextSchema,
     bio: optionalTextSchema,
-    avatarUrl: optionalTextSchema,
+    avatarUrl: optionalUrlSchema,
     socials: z
       .object({
         x: optionalTextSchema,

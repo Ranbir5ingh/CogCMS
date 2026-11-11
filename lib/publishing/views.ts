@@ -15,6 +15,30 @@ function projection(fields: string[]): Record<string, 1> {
 // Public BSON contract: add fields deliberately; never project an entire nested object.
 const definitions = [
   {
+    kind: 'events',
+    source: 'events',
+    fields: [
+      'title',
+      'slug',
+      'summary',
+      'content',
+      'imageUrl',
+      'imageAlt',
+      'startAt',
+      'endAt',
+      'timeZone',
+      'format',
+      'location',
+      'onlineUrl',
+      'registrationUrl',
+      'organizer',
+      'speakers',
+      'metaTitle',
+      'metaDescription',
+      'updatedAt',
+    ],
+  },
+  {
     kind: 'site',
     source: 'sites',
     fields: [

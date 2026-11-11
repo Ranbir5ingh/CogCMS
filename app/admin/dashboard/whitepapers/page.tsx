@@ -2,8 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import * as AlertDialog from '@radix-ui/react-alert-dialog';
 import { useSite } from '@/components/admin/site-provider';
+import { useToast } from '@/components/admin/toast-provider';
+import { TOAST_MESSAGES } from '@/components/admin/toast-messages';
+import { ConfirmDialog } from '@/components/admin/confirm-dialog';
+import { RowActionsMenu, ROW_ACTION_ITEM_CLASS } from '@/components/admin/row-actions-menu';
 import { publicUrlFor } from '@/lib/site/urls';
 
 interface Whitepaper {
@@ -21,6 +24,7 @@ export default function AdminWhitepapersList() {
   const site = useSite();
   const [whitepapers, setWhitepapers] = useState<Whitepaper[]>([]);
   const [loading, setLoading] = useState(true);
+  const { showToast } = useToast();
 
   useEffect(() => {
     fetch('/api/admin/whitepapers', { cache: 'no-store' })
@@ -30,15 +34,17 @@ export default function AdminWhitepapersList() {
           setWhitepapers(data);
         } else {
           console.error('API Error:', data);
+          showToast('error', data?.error || TOAST_MESSAGES.whitepapers.listLoadFailed);
           setWhitepapers([]);
         }
         setLoading(false);
       })
       .catch((err) => {
         console.error(err);
+        showToast('error', TOAST_MESSAGES.whitepapers.listLoadFailed);
         setLoading(false);
       });
-  }, []);
+  }, [showToast]);
 
   const [whitepaperToDelete, setWhitepaperToDelete] = useState<string | null>(null);
 
@@ -55,9 +61,14 @@ export default function AdminWhitepapersList() {
       });
       if (res.ok) {
         setWhitepapers(whitepapers.filter((b) => b.slug !== whitepaperToDelete));
+        showToast('success', TOAST_MESSAGES.whitepapers.deleted);
+      } else {
+        const body = await res.json().catch(() => null);
+        showToast('error', body?.error || TOAST_MESSAGES.whitepapers.deleteFailed);
       }
     } catch (err) {
       console.error(err);
+      showToast('error', TOAST_MESSAGES.whitepapers.deleteFailed);
     } finally {
       setWhitepaperToDelete(null);
     }
@@ -169,34 +180,31 @@ export default function AdminWhitepapersList() {
                         </p>
                       </div>
                     </div>
-                    <div className="flex gap-2">
+                    <RowActionsMenu label={`Actions for ${whitepaper.title}`}>
+                      <Link
+                        href={`/admin/dashboard/whitepapers/new?slug=${whitepaper.slug}`}
+                        className={ROW_ACTION_ITEM_CLASS}
+                      >
+                        Edit
+                      </Link>
                       {whitepaper.status !== 'draft' && site && (
                         <a
                           href={publicUrlFor(site, 'whitepapers', whitepaper.slug)}
                           target="_blank"
                           rel="noreferrer"
-                          className="px-3 py-1.5 text-xs border rounded-lg hover:bg-blue-50 transition-colors"
-                          style={{
-                            borderColor: 'rgba(59,130,246,0.2)',
-                            color: '#3b82f6',
-                            fontWeight: 500,
-                          }}
+                          className={ROW_ACTION_ITEM_CLASS}
                         >
                           View
                         </a>
                       )}
                       <button
+                        type="button"
                         onClick={() => handleDeleteClick(whitepaper.slug)}
-                        className="px-3 py-1.5 text-xs border rounded-lg hover:bg-red-50 hover:text-red-600 transition-colors"
-                        style={{
-                          borderColor: 'rgba(239,68,68,0.2)',
-                          color: '#ef4444',
-                          fontWeight: 500,
-                        }}
+                        className={ROW_ACTION_ITEM_CLASS}
                       >
                         Delete
                       </button>
-                    </div>
+                    </RowActionsMenu>
                   </div>
                 );
               })}
@@ -206,60 +214,13 @@ export default function AdminWhitepapersList() {
       </div>
 
       {/* Premium Alert Dialog for Deletion */}
-      <AlertDialog.Root
+      <ConfirmDialog
         open={!!whitepaperToDelete}
         onOpenChange={(open) => !open && setWhitepaperToDelete(null)}
-      >
-        <AlertDialog.Portal>
-          <AlertDialog.Overlay className="fixed inset-0 z-[100] bg-black/30 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
-          <AlertDialog.Content
-            className="fixed left-[50%] top-[50%] z-[100] grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-white p-8 shadow-2xl sm:rounded-3xl duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%]"
-            style={{ borderColor: 'rgba(0,0,0,0.08)' }}
-          >
-            <div className="flex flex-col gap-3 text-center sm:text-left">
-              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-red-100 sm:mx-0">
-                <svg
-                  className="h-8 w-8 text-red-600"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  strokeWidth="1.5"
-                  stroke="currentColor"
-                  aria-hidden="true"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                  />
-                </svg>
-              </div>
-              <AlertDialog.Title className="text-xl font-semibold text-gray-900 mt-2 tracking-tight">
-                Delete this whitepaper post?
-              </AlertDialog.Title>
-              <AlertDialog.Description className="text-sm text-gray-500 leading-relaxed font-medium">
-                Are you absolutely sure you want to delete this content? This action cannot be
-                undone. This will permanently remove the whitepaper post, its metadata, and content
-                from your servers.
-              </AlertDialog.Description>
-            </div>
-            <div className="flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-3 mt-4">
-              <AlertDialog.Cancel asChild>
-                <button className="mt-3 inline-flex w-full justify-center rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:mt-0 sm:w-auto transition-colors">
-                  Cancel
-                </button>
-              </AlertDialog.Cancel>
-              <AlertDialog.Action asChild>
-                <button
-                  onClick={confirmDelete}
-                  className="inline-flex w-full justify-center rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-red-500 sm:w-auto transition-colors"
-                >
-                  Yes, delete it
-                </button>
-              </AlertDialog.Action>
-            </div>
-          </AlertDialog.Content>
-        </AlertDialog.Portal>
-      </AlertDialog.Root>
+        onConfirm={confirmDelete}
+        title="Delete this whitepaper post?"
+        description="Are you absolutely sure you want to delete this content? This action cannot be undone. This will permanently remove the whitepaper post, its metadata, and content from your servers."
+      />
     </div>
   );
 }

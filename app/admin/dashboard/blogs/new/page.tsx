@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback, useMemo, Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import 'react-quill-new/dist/quill.bubble.css';
 import '../editor-table.css';
@@ -19,6 +19,12 @@ import GraphicEditorModal from '@/components/blog-editor/graphics/GraphicEditorM
 import { decodeConfig } from '@/lib/blog-content/graphics/encode';
 import type { GraphicConfig } from '@/lib/blog-content/graphics/types';
 import { useSite } from '@/components/admin/site-provider';
+import { useToast } from '@/components/admin/toast-provider';
+import { TOAST_MESSAGES } from '@/components/admin/toast-messages';
+import { ConfirmDialog } from '@/components/admin/confirm-dialog';
+import { makeFormStateKey, useSessionFormState } from '@/lib/admin/session-form-state';
+import { useLeaveGuard } from '@/lib/admin/use-leave-guard';
+import { useEditorBaseline } from '@/lib/admin/use-editor-baseline';
 import { uploadImageDirect } from '@/lib/media/upload-client';
 import {
   CLIENT_UPLOAD_OUTPUT_TYPE,
@@ -26,6 +32,24 @@ import {
   compressedFileFrom,
   shouldCompressOnClient,
 } from '@/lib/media/compress-output';
+
+const TAG_COLORS = [
+  'text-orange-700 bg-orange-50 border-orange-200',
+  'text-sky-700 bg-sky-50 border-sky-200',
+  'text-emerald-700 bg-emerald-50 border-emerald-200',
+  'text-violet-700 bg-violet-50 border-violet-200',
+  'text-rose-700 bg-rose-50 border-rose-200',
+  'text-indigo-700 bg-indigo-50 border-indigo-200',
+  'text-teal-700 bg-teal-50 border-teal-200',
+];
+
+function tagColorIndex(tag: string): number {
+  let hash = 0;
+  for (let i = 0; i < tag.length; i += 1) hash = (hash * 31 + tag.charCodeAt(i)) % 100000;
+  return hash % TAG_COLORS.length;
+}
+
+import PromptDialog, { type PromptRequest } from '@/components/blog-editor/PromptDialog';
 
 const ReactQuill = dynamic(
   async () => {
@@ -102,6 +126,17 @@ function getContentStats(html: string) {
   return { words, readingTime };
 }
 
+function unwrapCodeBlockAtSelection(quill: any, range: { index: number; length: number }): boolean {
+  if (!quill || !range || range.length > 0) return false;
+  const container = quill.getLine(range.index)?.[0]?.parent;
+  if (!container || typeof container.length !== 'function') return false;
+  const index = quill.getIndex(container);
+  if (range.index !== index) return false;
+  quill.formatLine(index, container.length(), 'code-block', false, 'user');
+  quill.setSelection(index, 0, 'user');
+  return true;
+}
+
 function deleteTableRowOrWholeTableAtSelection(
   quill: any,
   range: { index: number; length: number } | null,
@@ -121,6 +156,8 @@ function deleteTableRowOrWholeTableAtSelection(
   const isDeleteIntent =
     (direction === 'backspace' && atStartOfCell) || (direction === 'delete' && atEndOfCell);
   if (!isDeleteIntent) return false;
+
+  if ((row.domNode?.textContent ?? '').trim() !== '') return false;
 
   const rowCount =
     typeof table.rows === 'function'
@@ -437,10 +474,13 @@ function ShortcutsPanel({ onClose }: { onClose: () => void }) {
   );
 }
 
+
+const SLUG_MAX_LENGTH = 160;
+const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
 // ── Main editor form ────────────────────────────
 function EditorForm() {
   const site = useSite();
-  const router = useRouter();
   const searchParams = useSearchParams();
   const editSlug = searchParams.get('slug');
 
@@ -448,7 +488,7 @@ function EditorForm() {
   const [originalSlug, setOriginalSlug] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { showToast } = useToast();
   const [isSeoOpen, setIsSeoOpen] = useState(false);
   const [isStructuredOpen, setIsStructuredOpen] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -459,6 +499,8 @@ function EditorForm() {
   } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
+  const [slugInvalid, setSlugInvalid] = useState(false);
+  const [lastPublishedAt, setLastPublishedAt] = useState<string | null>(null);
 
   // Tag Menu State
   const [showTagMenu, setShowTagMenu] = useState(false);
@@ -470,12 +512,15 @@ function EditorForm() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inlineImageRef = useRef<HTMLInputElement>(null);
   const quillRef = useRef<any>(null);
+  const [promptRequest, setPromptRequest] = useState<PromptRequest | null>(null);
+  const savedRange = useRef<number | null>(null);
 
   const [formData, setFormData] = useState({
     title: '',
     slug: '',
     excerpt: '',
     imageUrl: '',
+    imageAlt: '',
     tag: 'Insights',
     isFeatured: false,
     metaTitle: '',
@@ -504,12 +549,15 @@ function EditorForm() {
     fetch(`/api/admin/blogs/${editSlug}`, { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => {
-        if (!data.error) {
+        if (data.error) {
+          showToast('error', data.error || TOAST_MESSAGES.blogEditor.loadFailed);
+        } else {
           const hydrated = {
             title: data.title || '',
             slug: data.slug || '',
             excerpt: data.excerpt || '',
             imageUrl: data.imageUrl || '',
+            imageAlt: data.imageAlt || '',
             tag: data.tag || 'Insights',
             isFeatured: !!data.isFeatured,
             metaTitle: data.metaTitle || '',
@@ -529,6 +577,7 @@ function EditorForm() {
           };
           setFormData(hydrated);
           setContent(data.content || '');
+          setLastPublishedAt(data.status === 'publish' ? data.updatedAt || null : null);
           setSlugManuallyEdited(true);
           initialSnapshotRef.current = JSON.stringify({
             ...hydrated,
@@ -536,9 +585,12 @@ function EditorForm() {
           });
         }
       })
-      .catch(console.error)
+      .catch((err) => {
+        console.error(err);
+        showToast('error', TOAST_MESSAGES.blogEditor.loadFailed);
+      })
       .finally(() => setLoadingData(false));
-  }, [editSlug]);
+  }, [editSlug, showToast]);
 
   useEffect(() => {
     if (!editSlug) {
@@ -552,6 +604,25 @@ function EditorForm() {
 
   const stats = useMemo(() => getContentStats(content), [content]);
   const hasUnsavedChanges = JSON.stringify({ ...formData, content }) !== initialSnapshotRef.current;
+  // The snapshot is empty until the blank form or the loaded post is recorded.
+  const isDirty = initialSnapshotRef.current !== '' && hasUnsavedChanges;
+  const editorState = useMemo(() => ({ ...formData, content }), [formData, content]);
+  const editorBaseline = useEditorBaseline(editSlug);
+  const { clear: clearFormState } = useSessionFormState({
+    storageKey: site?.id ? makeFormStateKey(site.id, 'blog', editSlug) : null,
+    value: editorState,
+    isDirty,
+    ready: !loadingData,
+    onRestore: ({ content: savedContent, ...savedFields }) => {
+      editorBaseline.stop();
+      setFormData((prev) => ({ ...prev, ...savedFields }));
+      if (typeof savedContent === 'string') setContent(savedContent);
+      if (typeof savedFields.slug === 'string' && typeof savedFields.title === 'string') {
+        setSlugManuallyEdited(savedFields.slug !== slugify(savedFields.title));
+      }
+    },
+  });
+  const leaveGuard = useLeaveGuard(isDirty, clearFormState);
 
   // ── Auto-resize textareas ─────────────────────
   useEffect(() => {
@@ -575,6 +646,7 @@ function EditorForm() {
     const { name, value } = e.target;
     if (name === 'slug') {
       setSlugManuallyEdited(true);
+      setSlugInvalid(false);
     }
     setFormData({ ...formData, [name]: value });
   };
@@ -606,11 +678,11 @@ function EditorForm() {
     if (file) {
       try {
         setLoading(true);
-        setError(null);
         const imageUrl = await uploadImageFile(file, site?.id);
-        setFormData({ ...formData, imageUrl });
+        setFormData({ ...formData, imageUrl, imageAlt: '' });
+        showToast('success', TOAST_MESSAGES.blogEditor.coverUploaded);
       } catch (err: any) {
-        setError(err.message);
+        showToast('error', err.message || TOAST_MESSAGES.blogEditor.coverUploadFailed);
       } finally {
         setLoading(false);
         e.target.value = '';
@@ -628,23 +700,26 @@ function EditorForm() {
     setIsDragging(false);
   }, []);
 
-  const handleDrop = useCallback(async (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-    const file = e.dataTransfer.files[0];
-    if (file && file.type.startsWith('image/')) {
-      try {
-        setLoading(true);
-        setError(null);
-        const imageUrl = await uploadImageFile(file, site?.id);
-        setFormData((prev) => ({ ...prev, imageUrl }));
-      } catch (err: any) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
+  const handleDrop = useCallback(
+    async (e: React.DragEvent) => {
+      e.preventDefault();
+      setIsDragging(false);
+      const file = e.dataTransfer.files[0];
+      if (file && file.type.startsWith('image/')) {
+        try {
+          setLoading(true);
+          const imageUrl = await uploadImageFile(file, site?.id);
+          setFormData((prev) => ({ ...prev, imageUrl, imageAlt: '' }));
+          showToast('success', TOAST_MESSAGES.blogEditor.coverUploaded);
+        } catch (err: any) {
+          showToast('error', err.message || TOAST_MESSAGES.blogEditor.coverUploadFailed);
+        } finally {
+          setLoading(false);
+        }
       }
-    }
-  }, [site?.id]);
+    },
+    [site?.id, showToast],
+  );
 
   // ── Insert actions — use Quill API at cursor ───
   const handleInsertImage = () => {
@@ -657,7 +732,6 @@ function EditorForm() {
 
     try {
       setLoading(true);
-      setError(null);
       const imageUrl = await uploadImageFile(file, site?.id);
 
       const quill = (quillRef.current as any)?.getEditor?.();
@@ -673,8 +747,9 @@ function EditorForm() {
             prev + `<p><img src="${imageUrl}" alt="Inline image" style="max-width:100%" /></p>`,
         );
       }
+      showToast('success', TOAST_MESSAGES.blogEditor.imageInserted);
     } catch (err: any) {
-      setError(err.message);
+      showToast('error', err.message || TOAST_MESSAGES.blogEditor.imageUploadFailed);
     } finally {
       setLoading(false);
       // Reset so the same file can be re-selected
@@ -695,18 +770,59 @@ function EditorForm() {
     }
   };
 
+  const rememberSelection = () => {
+    const quill = (quillRef.current as any)?.getEditor?.();
+    savedRange.current = quill?.getSelection?.()?.index ?? null;
+  };
+
+  const restoreSelection = (quill: any): number => {
+    quill.focus();
+    const index = savedRange.current ?? quill.getLength();
+    quill.setSelection(index, 0, 'user');
+    savedRange.current = null;
+    return index;
+  };
+
   const handleInsertEmbed = () => {
-    const url = prompt('Paste a YouTube or Vimeo URL:');
-    if (!url) return;
+    rememberSelection();
+    setPromptRequest({
+      title: 'Insert video',
+      submitLabel: 'Insert',
+      fields: [
+        {
+          name: 'url',
+          label: 'Video URL',
+          placeholder: 'https://www.youtube.com/watch?v=...',
+          helper: 'YouTube or Vimeo',
+        },
+      ],
+      validate: ({ url }) => {
+        const value = url.trim();
+        if (!value) return 'Paste a video URL.';
+        let parsed: URL;
+        try {
+          parsed = new URL(value);
+        } catch {
+          return 'Enter a valid link, for example https://www.youtube.com/watch?v=xxxxx';
+        }
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+          return 'The link must start with http:// or https://';
+        }
+        return null;
+      },
+      onSubmit: ({ url }) => insertEmbedUrl(url.trim()),
+    });
+  };
+
+  const insertEmbedUrl = (url: string) => {
     let embedUrl = url;
     const ytMatch = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]+)/);
     if (ytMatch) embedUrl = `https://www.youtube.com/embed/${ytMatch[1]}`;
     const quill = (quillRef.current as any)?.getEditor?.();
     if (quill) {
-      const range = quill.getSelection(true);
-      const index = range ? range.index : quill.getLength();
-      quill.insertEmbed(index, 'video', embedUrl);
-      quill.setSelection(index + 1);
+      const index = restoreSelection(quill);
+      quill.insertEmbed(index, 'video', embedUrl, 'user');
+      quill.setSelection(index + 1, 0, 'user');
     } else {
       setContent(
         (prev) =>
@@ -716,24 +832,35 @@ function EditorForm() {
   };
 
   const handleInsertTable = () => {
-    const rowsInput = prompt('Number of rows?', '3');
-    if (!rowsInput) return;
-    const colsInput = prompt('Number of columns?', '3');
-    if (!colsInput) return;
+    rememberSelection();
+    const inRange = (raw: string, max: number, name: string): string | null => {
+      const parsed = Number.parseInt(raw, 10);
+      if (!raw.trim() || Number.isNaN(parsed)) return `Enter a number of ${name}.`;
+      if (parsed < 1 || parsed > max) return `${name} must be between 1 and ${max}.`;
+      return null;
+    };
+    setPromptRequest({
+      title: 'Insert table',
+      submitLabel: 'Insert',
+      fields: [
+        { name: 'rows', label: 'Rows', type: 'number', defaultValue: '3', helper: '1-10' },
+        { name: 'cols', label: 'Columns', type: 'number', defaultValue: '3', helper: '1-8' },
+      ],
+      validate: ({ rows, cols }) => inRange(rows, 10, 'Rows') ?? inRange(cols, 8, 'Columns'),
+      onSubmit: ({ rows, cols }) =>
+        insertTable(Number.parseInt(rows, 10), Number.parseInt(cols, 10)),
+    });
+  };
 
-    const parsedRows = Number.parseInt(rowsInput, 10);
-    const parsedCols = Number.parseInt(colsInput, 10);
-    // Invalid values fall back to sensible defaults, then clamp to supported bounds.
-    const rows = Math.min(10, Math.max(1, Number.isNaN(parsedRows) ? 3 : parsedRows));
-    const cols = Math.min(8, Math.max(1, Number.isNaN(parsedCols) ? 3 : parsedCols));
-
+  const insertTable = (rows: number, cols: number) => {
     const quill = (quillRef.current as any)?.getEditor?.();
-
     const tableModule = quill?.getModule?.('table');
-    if (!tableModule || typeof tableModule.insertTable !== 'function') {
-      setError('Table support is unavailable in this editor configuration.');
+    if (!quill || !tableModule || typeof tableModule.insertTable !== 'function') {
+      showToast('error', TOAST_MESSAGES.blogEditor.tableUnavailable);
       return;
     }
+
+    restoreSelection(quill);
     tableModule.insertTable(rows, cols);
   };
 
@@ -774,6 +901,16 @@ function EditorForm() {
     setGraphicModal(null);
   };
 
+  const handleRemoveGraphic = () => {
+    const index = graphicModal?.editIndex;
+    const quill = (quillRef.current as any)?.getEditor?.();
+    if (quill && index != null) {
+      quill.deleteText(index, 1, 'user');
+      quill.setSelection(index, 0, 'user');
+    }
+    setGraphicModal(null);
+  };
+
   // Click an inserted graphic to edit it (the blot is contenteditable=false)
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -793,20 +930,27 @@ function EditorForm() {
   // ── Submit ────────────────────────────────────
   const handleSubmit = async (action: 'draft' | 'publish') => {
     if (!formData.title) {
-      setError('Title is required.');
+      showToast('error', TOAST_MESSAGES.blogEditor.titleRequired);
       return;
     }
     if (!formData.slug) {
-      setError('Slug is required.');
+      setSlugInvalid(true);
+      setIsSeoOpen(true);
+      showToast('error', TOAST_MESSAGES.blogEditor.slugRequired);
+      return;
+    }
+    if (formData.slug.length > SLUG_MAX_LENGTH || !SLUG_PATTERN.test(formData.slug)) {
+      setSlugInvalid(true);
+      setIsSeoOpen(true);
+      showToast('error', TOAST_MESSAGES.blogEditor.invalidSlug);
       return;
     }
     if (!content.trim()) {
-      setError('Content is required.');
+      showToast('error', TOAST_MESSAGES.blogEditor.contentRequired);
       return;
     }
 
     setLoading(true);
-    setError(null);
 
     try {
       const isEdit = !!originalSlug;
@@ -838,15 +982,28 @@ function EditorForm() {
 
       const data = await res.json();
       if (!res.ok) {
-        setError(
-          data.details?.fieldErrors?.authorId?.[0] || data.error || 'Failed to save blog post.',
+        showToast(
+          'error',
+          data.details?.fieldErrors?.authorId?.[0] ||
+            data.error ||
+            TOAST_MESSAGES.blogEditor.saveFailed,
         );
         return;
       }
       initialSnapshotRef.current = JSON.stringify({ ...formData, content });
-      router.push('/admin/dashboard/blogs');
+      // The provider lives in the dashboard layout, so this survives the redirect.
+      showToast(
+        'success',
+        action === 'publish'
+          ? isEdit
+            ? TOAST_MESSAGES.blogEditor.republished
+            : TOAST_MESSAGES.blogEditor.published
+          : TOAST_MESSAGES.blogEditor.draftSaved,
+      );
+      clearFormState();
+      leaveGuard.leaveTo('/admin/dashboard/blogs');
     } catch (err: any) {
-      setError(err.message);
+      showToast('error', err.message || TOAST_MESSAGES.blogEditor.saveFailed);
     } finally {
       setLoading(false);
     }
@@ -874,6 +1031,15 @@ function EditorForm() {
                 context,
                 'backspace',
               );
+            },
+          },
+          'code-block backspace': {
+            key: 'Backspace',
+            format: ['code-block'],
+            collapsed: true,
+            offset: 0,
+            handler(this: { quill: any }, range: { index: number; length: number }) {
+              return !unwrapCodeBlockAtSelection(this.quill, range);
             },
           },
           'table delete': {
@@ -925,7 +1091,7 @@ function EditorForm() {
   ];
 
   return (
-    <div className="min-h-screen bg-white text-[#1a1a1a]">
+    <div className="min-h-screen text-[#1a1a1a]">
       {/* Hidden file inputs */}
       <input
         type="file"
@@ -936,27 +1102,13 @@ function EditorForm() {
       />
 
       {/* ── Sticky top bar ──────────────────────── */}
-      <div
-        className="sticky top-0 z-50 bg-white/95 backdrop-blur-lg px-6 py-3.5 flex items-center justify-between"
-        style={{ borderBottom: '1px solid rgba(0,0,0,0.06)' }}
-      >
+      <div className="sticky top-0 z-50 bg-[#f8f6f3]/95 backdrop-blur-lg px-6 py-3.5 flex items-center justify-between border-b border-stone-200">
         <div className="flex items-center gap-4">
           <Link
             href="/admin/dashboard/blogs"
-            className="text-gray-400 hover:text-gray-800 transition-colors"
+            className="text-sm font-medium text-orange-700 hover:text-orange-800"
           >
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M19 12H5M12 19l-7-7 7-7" />
-            </svg>
+            ← Blogs
           </Link>
 
           {/* Loading / Save status */}
@@ -1039,254 +1191,60 @@ function EditorForm() {
             type="button"
             onClick={() => handleSubmit('draft')}
             disabled={loading}
-            className="px-4 py-2 text-[13px] text-gray-600 hover:bg-gray-50 border rounded-full transition-colors disabled:opacity-50"
-            style={{ fontWeight: 500, borderColor: 'rgba(0,0,0,0.12)' }}
+            className="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-stone-700 disabled:opacity-50"
           >
             Save draft
           </button>
-          <button
-            type="button"
-            onClick={() => handleSubmit('publish')}
-            disabled={loading}
-            className="px-5 py-2 text-[13px] text-white rounded-full shadow-sm transition-all disabled:opacity-50"
-            style={{
-              fontWeight: 600,
-              background: 'linear-gradient(135deg, #1a8917, #2ba52b)',
-              boxShadow: '0 2px 8px rgba(26,137,23,0.3)',
-            }}
-          >
-            {loading ? 'Publishing...' : 'Publish'}
-          </button>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => handleSubmit('publish')}
+              disabled={loading}
+              className="rounded-xl bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-orange-700 disabled:opacity-50"
+            >
+              {loading ? 'Publishing...' : 'Publish'}
+            </button>
+            {lastPublishedAt && (
+              <span
+                className="absolute right-0 top-full mt-1 whitespace-nowrap text-[10px] text-gray-400"
+                style={{ fontWeight: 500 }}
+              >
+                Last published{' '}
+                {new Date(lastPublishedAt).toLocaleString('en-US', {
+                  month: 'short',
+                  day: 'numeric',
+                  year: 'numeric',
+                })}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
-      {error && (
-        <div className="max-w-[720px] mx-auto mt-6 px-6">
-          <div className="p-4 text-sm text-red-700 bg-red-50 rounded-xl border border-red-200">
-            {error}
-          </div>
-        </div>
-      )}
-
       {/* ── Main editor canvas ─────────────────── */}
-      <main className="max-w-[720px] mx-auto px-6 pt-12 pb-32">
-        {/* ── Cover image with drag & drop ─────── */}
-        <div className="mb-10 group">
-          {formData.imageUrl ? (
-            <div className="relative w-full aspect-[16/9] bg-gray-50 rounded-xl overflow-hidden group-hover:ring-2 ring-black/5 transition-all">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={formData.imageUrl} alt="Cover" className="w-full h-full object-cover" />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-              {/* Remove button — always visible */}
-              <button
-                type="button"
-                onClick={() => setFormData({ ...formData, imageUrl: '' })}
-                className="absolute top-3 right-3 bg-white text-gray-600 p-1.5 rounded-lg hover:bg-red-50 hover:text-red-500 transition-colors flex items-center gap-1 text-xs shadow-sm border"
-                style={{ fontWeight: 500, borderColor: 'rgba(0,0,0,0.08)' }}
-              >
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-                Remove cover
-              </button>
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="absolute bottom-3 right-3 bg-white/90 backdrop-blur text-gray-700 px-3 py-1.5 rounded-lg text-xs hover:bg-white transition-colors opacity-0 group-hover:opacity-100 flex items-center gap-1.5"
-                style={{ fontWeight: 500 }}
-              >
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M12 20h9" />
-                  <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-                </svg>
-                Change
-              </button>
-            </div>
-          ) : (
-            <div
-              className={`w-full aspect-[16/9] border-2 border-dashed rounded-xl flex flex-col items-center justify-center p-8 text-center transition-all cursor-pointer ${
-                isDragging
-                  ? 'border-[#FF751F] bg-orange-50/50'
-                  : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50/50'
-              }`}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              onClick={() => !isDragging && fileInputRef.current?.click()}
-            >
-              <svg
-                className="w-7 h-7 text-gray-300 mb-3"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5a1.5 1.5 0 001.5-1.5V5.25a1.5 1.5 0 00-1.5-1.5H3.75a1.5 1.5 0 00-1.5 1.5V19.5a1.5 1.5 0 001.5 1.5z"
+      <main className="max-w-[860px] mx-auto px-6 pt-10 pb-32">
+        <div className="rounded-2xl border border-stone-200 bg-white p-8 shadow-sm">
+          {/* ── Cover image with drag & drop ─────── */}
+          <div className="mb-10 group">
+            {formData.imageUrl ? (
+              <div className="relative w-full aspect-[16/9] bg-gray-50 rounded-xl overflow-hidden group-hover:ring-2 ring-black/5 transition-all">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={formData.imageUrl}
+                  alt={formData.imageAlt || 'Cover'}
+                  className="w-full h-full object-cover"
                 />
-              </svg>
-              <p className="text-sm text-gray-400 mb-1" style={{ fontWeight: 500 }}>
-                {isDragging ? 'Drop image here' : 'Add a cover image'}
-              </p>
-              <p className="text-[11px] text-gray-300">Drag & drop or click to browse</p>
-              <p className="text-[11px] text-gray-300 mt-1">Recommended: 2240×1260px (16:9)</p>
-
-              {/* URL toggle */}
-              <div className="flex items-center gap-2 mt-4">
+                <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                {/* Remove button — always visible */}
                 <button
                   type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setImageType('url');
-                  }}
-                  className={`text-[11px] px-2.5 py-1 rounded-full transition-colors ${imageType === 'url' ? 'bg-gray-200 text-gray-700' : 'text-gray-400 hover:text-gray-600'}`}
-                  style={{ fontWeight: 500 }}
-                >
-                  Paste URL
-                </button>
-              </div>
-
-              {imageType === 'url' && (
-                <input
-                  type="text"
-                  name="imageUrl"
-                  value={formData.imageUrl}
-                  onChange={handleChange}
-                  onClick={(e) => e.stopPropagation()}
-                  className="mt-3 px-4 py-2 w-full max-w-sm rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-orange-200 text-center"
-                  style={{ borderColor: 'rgba(0,0,0,0.1)' }}
-                  placeholder="https://example.com/image.jpg"
-                />
-              )}
-            </div>
-          )}
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleImageUpload}
-            className="hidden"
-            accept="image/*"
-          />
-        </div>
-
-        {/* ── Tags (multi-select) ────────────────── */}
-        <div className="mb-6 flex flex-wrap items-center gap-2 relative">
-          {formData.tags.map((t) => (
-            <span
-              key={t}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-orange-600 bg-orange-50 border border-orange-100 rounded-full"
-            >
-              {t}
-              <button
-                type="button"
-                onClick={() =>
-                  setFormData({ ...formData, tags: formData.tags.filter((x) => x !== t) })
-                }
-                className="text-orange-400 hover:text-orange-700 leading-none text-sm"
-                aria-label={`Remove tag ${t}`}
-              >
-                ×
-              </button>
-            </span>
-          ))}
-
-          <button
-            type="button"
-            onClick={() => setShowTagMenu(!showTagMenu)}
-            className="px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-orange-600 bg-orange-50 border border-orange-100 rounded-full cursor-pointer hover:bg-orange-100 transition-colors focus:outline-none focus:ring-2 focus:ring-orange-200 flex items-center gap-2 relative z-[5]"
-            style={{ fontFamily: 'inherit' }}
-          >
-            {formData.tags.length ? 'Add Tag' : 'Add Tags'}
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M5 12h14" />
-              <path d="M12 5v14" />
-            </svg>
-          </button>
-
-          {showTagMenu && (
-            <div className="absolute top-full left-0 mt-2 w-56 bg-white border border-gray-100 shadow-xl rounded-xl z-[60] p-2 flex flex-col gap-1">
-              {predefinedTags.map((t) => {
-                const active = formData.tags.includes(t);
-                return (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() =>
-                      setFormData({
-                        ...formData,
-                        tags: active ? formData.tags.filter((x) => x !== t) : [...formData.tags, t],
-                      })
-                    }
-                    className={`flex items-center justify-between text-left px-3 py-2 text-xs rounded-lg transition-colors ${active ? 'bg-orange-50 text-orange-600 font-medium' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`}
-                  >
-                    {t}
-                    {active && <span className="text-orange-500">✓</span>}
-                  </button>
-                );
-              })}
-              <div className="h-px bg-gray-100 my-1"></div>
-              <div className="flex items-center gap-2 px-1 py-1">
-                <input
-                  type="text"
-                  placeholder="Custom tag..."
-                  value={customTag}
-                  onChange={(e) => setCustomTag(e.target.value)}
-                  className="w-full px-2 py-1.5 text-xs border border-gray-200 rounded-md focus:outline-none focus:border-orange-300 placeholder-gray-400"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      const v = customTag.trim();
-                      if (v && !formData.tags.includes(v)) {
-                        setFormData({ ...formData, tags: [...formData.tags, v] });
-                      }
-                      setCustomTag('');
-                    }
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const v = customTag.trim();
-                    if (v && !formData.tags.includes(v)) {
-                      setFormData({ ...formData, tags: [...formData.tags, v] });
-                    }
-                    setCustomTag('');
-                  }}
-                  className="bg-orange-500 text-white rounded-md p-1.5 hover:bg-orange-600 transition-colors flex-shrink-0"
+                  onClick={() => setFormData({ ...formData, imageUrl: '', imageAlt: '' })}
+                  className="absolute top-3 right-3 bg-white text-gray-600 p-1.5 rounded-lg hover:bg-red-50 hover:text-red-500 transition-colors flex items-center gap-1 text-xs shadow-sm border"
+                  style={{ fontWeight: 500, borderColor: 'rgba(0,0,0,0.08)' }}
                 >
                   <svg
-                    width="14"
-                    height="14"
+                    width="12"
+                    height="12"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
@@ -1294,308 +1252,537 @@ function EditorForm() {
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   >
-                    <path d="M5 12h14" />
-                    <path d="m12 5 7 7-7 7" />
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
                   </svg>
+                  Remove cover
+                </button>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="absolute bottom-3 right-3 bg-white/90 backdrop-blur text-gray-700 px-3 py-1.5 rounded-lg text-xs hover:bg-white transition-colors opacity-0 group-hover:opacity-100 flex items-center gap-1.5"
+                  style={{ fontWeight: 500 }}
+                >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M12 20h9" />
+                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                  </svg>
+                  Change
                 </button>
               </div>
-            </div>
-          )}
-        </div>
+            ) : (
+              <div
+                className={`w-full aspect-[16/9] border-2 border-dashed rounded-xl flex flex-col items-center justify-center p-8 text-center transition-all cursor-pointer ${
+                  isDragging
+                    ? 'border-[#FF751F] bg-orange-50/50'
+                    : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50/50'
+                }`}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                onClick={() => !isDragging && fileInputRef.current?.click()}
+              >
+                <svg
+                  className="w-7 h-7 text-gray-300 mb-3"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5a1.5 1.5 0 001.5-1.5V5.25a1.5 1.5 0 00-1.5-1.5H3.75a1.5 1.5 0 00-1.5 1.5V19.5a1.5 1.5 0 001.5 1.5z"
+                  />
+                </svg>
+                <p className="text-sm text-gray-400 mb-1" style={{ fontWeight: 500 }}>
+                  {isDragging ? 'Drop image here' : 'Add a cover image'}
+                </p>
+                <p className="text-[11px] text-gray-300">Drag & drop or click to browse</p>
+                <p className="text-[11px] text-gray-300 mt-1">Recommended: 2240×1260px (16:9)</p>
 
-        {/* ── Title & Subtitle ─────────────────── */}
-        <div className="mb-2">
-          <textarea
-            ref={titleRef}
-            name="title"
-            value={formData.title}
-            onChange={handleTitleChange}
-            onKeyDown={handleTitleKeyDown}
-            placeholder="Title"
-            className="w-full text-[40px] text-[#242424] placeholder-[#c8c8c8] border-none outline-none resize-none overflow-hidden leading-[1.15] mb-3 block bg-transparent"
-            style={{ fontWeight: 600, letterSpacing: '-0.02em' }}
-            rows={1}
-          />
+                {/* URL toggle */}
+                <div className="flex items-center gap-2 mt-4">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setImageType('url');
+                    }}
+                    className={`text-[11px] px-2.5 py-1 rounded-full transition-colors ${imageType === 'url' ? 'bg-gray-200 text-gray-700' : 'text-gray-400 hover:text-gray-600'}`}
+                    style={{ fontWeight: 500 }}
+                  >
+                    Paste URL
+                  </button>
+                </div>
 
-          <textarea
-            ref={excerptRef}
-            name="excerpt"
-            value={formData.excerpt}
-            onChange={handleChange}
-            placeholder="Tell readers what your story is about..."
-            className="w-full text-xl text-[#757575] placeholder-[#c8c8c8] border-none outline-none resize-none overflow-hidden leading-relaxed mb-6 block bg-transparent"
-            style={{ fontWeight: 400 }}
-            rows={1}
-          />
-        </div>
+                {imageType === 'url' && (
+                  <input
+                    type="text"
+                    name="imageUrl"
+                    value={formData.imageUrl}
+                    onChange={handleChange}
+                    onClick={(e) => e.stopPropagation()}
+                    className="mt-3 px-4 py-2 w-full max-w-sm rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-orange-200 text-center"
+                    style={{ borderColor: 'rgba(0,0,0,0.1)' }}
+                    placeholder="https://example.com/image.jpg"
+                  />
+                )}
+              </div>
+            )}
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleImageUpload}
+              className="hidden"
+              accept="image/*"
+            />
+            {formData.imageUrl && (
+              <input
+                type="text"
+                name="imageAlt"
+                value={formData.imageAlt}
+                onChange={handleChange}
+                maxLength={300}
+                aria-label="Cover image alt text"
+                className="mt-3 px-4 py-2 w-full rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-orange-200"
+                style={{ borderColor: 'rgba(0,0,0,0.1)' }}
+                placeholder="Cover image alt text — describe the image for screen readers"
+              />
+            )}
+          </div>
 
-        {/* ── Separator ────────────────────────── */}
-        <div className="h-px bg-gray-100 mb-8" />
+          {/* ── Tags (multi-select) ────────────────── */}
+          <div className="mb-6 flex flex-wrap items-center gap-2 relative">
+            {/* Add stays first so its position never shifts as tags accumulate. */}
+            <button
+              type="button"
+              onClick={() => setShowTagMenu(!showTagMenu)}
+              className="px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-gray-600 bg-white border border-gray-200 rounded-full cursor-pointer hover:border-gray-300 hover:text-gray-900 transition-colors focus:outline-none focus:ring-2 focus:ring-orange-200 flex items-center gap-2 relative z-[5] flex-none"
+              style={{ fontFamily: 'inherit' }}
+            >
+              {formData.tags.length ? 'Add Tag' : 'Add Tags'}
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M5 12h14" />
+                <path d="M12 5v14" />
+              </svg>
+            </button>
 
-        {/* ── Inline insert toolbar + Bubble editor ─ */}
-        <div className="relative">
-          {/* Always-visible inline insert toolbar */}
-          <InsertToolbar
-            onInsertImage={handleInsertImage}
-            onInsertDivider={handleInsertDivider}
-            onInsertEmbed={handleInsertEmbed}
-            onInsertTable={handleInsertTable}
-            onInsertCode={handleInsertCode}
-            onInsertGraphic={handleInsertGraphic}
-          />
+            {formData.tags.map((t) => {
+              const palette = TAG_COLORS[tagColorIndex(t)];
+              return (
+                <span
+                  key={t}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-full border ${palette}`}
+                >
+                  {t}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setFormData({ ...formData, tags: formData.tags.filter((x) => x !== t) })
+                    }
+                    className="leading-none text-sm opacity-60 hover:opacity-100"
+                    aria-label={`Remove tag ${t}`}
+                    title={`Remove tag ${t}`}
+                  >
+                    ×
+                  </button>
+                </span>
+              );
+            })}
 
-          {/* Quill with bubble theme — floating toolbar on selection */}
-          {/* Tip: click any inserted image to select it, then press Delete/Backspace to remove it */}
-          <div
-            className="editor-canvas
-            [&_.ql-container]:border-0
-            [&_.ql-editor.ql-blank::before]:text-[#c8c8c8] [&_.ql-editor.ql-blank::before]:text-lg [&_.ql-editor.ql-blank::before]:font-normal [&_.ql-editor.ql-blank::before]:left-0 [&_.ql-editor.ql-blank::before]:not-italic
-            [&_.ql-editor]:min-h-[400px] [&_.ql-editor]:px-0
-            [&_.ql-editor_.ql-size-small]:text-[0.9em]
-            [&_.ql-editor_.ql-size-large]:text-[1.2em]
-            [&_.ql-editor_.ql-size-huge]:text-[1.45em]
-            [&_.ql-bubble_.ql-tooltip]:bg-[#1a1a1a] [&_.ql-bubble_.ql-tooltip]:rounded-lg [&_.ql-bubble_.ql-tooltip]:shadow-xl
-          "
-          >
-            <ReactQuill
-              // Keep browser-escaped attributes; Quill 2 semantic video export is unsafe.
-              useSemanticHTML={false}
-              {...({ ref: quillRef } as any)}
-              theme="bubble"
-              value={content}
-              onChange={setContent}
-              modules={modules}
-              formats={formats}
-              placeholder="Write your story..."
+            {showTagMenu && (
+              <div className="absolute top-full left-0 mt-2 w-56 bg-white border border-gray-100 shadow-xl rounded-xl z-[60] p-2 flex flex-col gap-1">
+                {predefinedTags.map((t) => {
+                  const active = formData.tags.includes(t);
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() =>
+                        setFormData({
+                          ...formData,
+                          tags: active
+                            ? formData.tags.filter((x) => x !== t)
+                            : [...formData.tags, t],
+                        })
+                      }
+                      className={`flex items-center justify-between text-left px-3 py-2 text-xs rounded-lg transition-colors ${active ? 'bg-orange-50 text-orange-600 font-medium' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`}
+                    >
+                      {t}
+                      {active && <span className="text-orange-500">✓</span>}
+                    </button>
+                  );
+                })}
+                <div className="h-px bg-gray-100 my-1"></div>
+                <div className="flex items-center gap-2 px-1 py-1">
+                  <input
+                    type="text"
+                    placeholder="Custom tag..."
+                    value={customTag}
+                    onChange={(e) => setCustomTag(e.target.value)}
+                    className="w-full px-2 py-1.5 text-xs border border-gray-200 rounded-md focus:outline-none focus:border-orange-300 placeholder-gray-400"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const v = customTag.trim();
+                        if (v && !formData.tags.includes(v)) {
+                          setFormData({ ...formData, tags: [...formData.tags, v] });
+                        }
+                        setCustomTag('');
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const v = customTag.trim();
+                      if (v && !formData.tags.includes(v)) {
+                        setFormData({ ...formData, tags: [...formData.tags, v] });
+                      }
+                      setCustomTag('');
+                    }}
+                    className="bg-orange-500 text-white rounded-md p-1.5 hover:bg-orange-600 transition-colors flex-shrink-0"
+                  >
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M5 12h14" />
+                      <path d="m12 5 7 7-7 7" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── Title & Subtitle ─────────────────── */}
+          <div className="mb-2">
+            <textarea
+              ref={titleRef}
+              name="title"
+              value={formData.title}
+              onChange={handleTitleChange}
+              onKeyDown={handleTitleKeyDown}
+              placeholder="Title"
+              className="w-full text-[40px] text-[#242424] placeholder-[#c8c8c8] border-none outline-none resize-none overflow-hidden leading-[1.15] mb-3 block bg-transparent"
+              style={{ fontWeight: 600, letterSpacing: '-0.02em' }}
+              rows={1}
+            />
+
+            <textarea
+              ref={excerptRef}
+              name="excerpt"
+              value={formData.excerpt}
+              onChange={handleChange}
+              placeholder="Tell readers what your story is about..."
+              className="w-full text-xl text-[#757575] placeholder-[#c8c8c8] border-none outline-none resize-none overflow-hidden leading-relaxed mb-6 block bg-transparent"
+              style={{ fontWeight: 400 }}
+              rows={1}
             />
           </div>
-        </div>
 
-        {/* ── Author ──────────────────────────── */}
-        <div className="mt-14 pt-8 space-y-5" style={{ borderTop: '1px solid rgba(0,0,0,0.06)' }}>
-          <AuthorPicker
-            value={formData.authorId}
-            onChange={(id) => setFormData({ ...formData, authorId: id })}
-          />
-        </div>
+          {/* ── Separator ────────────────────────── */}
+          <div className="h-px bg-gray-100 mb-8" />
 
-        {/* ── Structured content ──────────────── */}
-        <div className="mt-10 pt-8" style={{ borderTop: '1px solid rgba(0,0,0,0.06)' }}>
-          <button
-            type="button"
-            onClick={() => setIsStructuredOpen(!isStructuredOpen)}
-            className="flex items-center justify-between w-full text-left py-2 cursor-pointer"
-          >
-            <div className="flex items-center gap-2">
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="text-gray-400"
-              >
-                <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" />
-                <rect x="9" y="3" width="6" height="4" rx="1" />
-                <line x1="9" y1="12" x2="15" y2="12" />
-                <line x1="9" y1="16" x2="13" y2="16" />
-              </svg>
-              <span className="text-sm" style={{ fontWeight: 600, color: '#555' }}>
-                Structured Content
-              </span>
-            </div>
-            <svg
-              className={`w-4 h-4 text-gray-400 transform transition-transform ${isStructuredOpen ? 'rotate-180' : ''}`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+          {/* ── Inline insert toolbar + Bubble editor ─ */}
+          <div className="relative">
+            {/* Always-visible inline insert toolbar */}
+            <InsertToolbar
+              onInsertImage={handleInsertImage}
+              onInsertDivider={handleInsertDivider}
+              onInsertEmbed={handleInsertEmbed}
+              onInsertTable={handleInsertTable}
+              onInsertCode={handleInsertCode}
+              onInsertGraphic={handleInsertGraphic}
+            />
+
+            {/* Quill with bubble theme — floating toolbar on selection */}
+            {/* Tip: click any inserted image to select it, then press Delete/Backspace to remove it */}
+            <div
+              className="editor-canvas
+              [&_.ql-container]:border-0
+              [&_.ql-editor.ql-blank::before]:text-[#c8c8c8] [&_.ql-editor.ql-blank::before]:text-lg [&_.ql-editor.ql-blank::before]:font-normal [&_.ql-editor.ql-blank::before]:left-0 [&_.ql-editor.ql-blank::before]:not-italic
+              [&_.ql-editor]:min-h-[400px] [&_.ql-editor]:max-h-[60vh] [&_.ql-editor]:overflow-y-auto [&_.ql-editor]:px-0
+              [&_.ql-editor_.ql-size-small]:text-[0.9em]
+              [&_.ql-editor_.ql-size-large]:text-[1.2em]
+              [&_.ql-editor_.ql-size-huge]:text-[1.45em]
+              [&_.ql-bubble_.ql-tooltip]:bg-[#1a1a1a] [&_.ql-bubble_.ql-tooltip]:rounded-lg [&_.ql-bubble_.ql-tooltip]:shadow-xl
+            "
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2"
-                d="M19 9l-7 7-7-7"
+              <ReactQuill
+                // Keep browser-escaped attributes; Quill 2 semantic video export is unsafe.
+                useSemanticHTML={false}
+                {...({ ref: quillRef } as any)}
+                theme="bubble"
+                value={content}
+                onChange={(value: string, _delta: unknown, source: string) => {
+                  setContent(value);
+                  if (initialSnapshotRef.current && editorBaseline.acceptsNormalisation(source)) {
+                    initialSnapshotRef.current = JSON.stringify({
+                      ...JSON.parse(initialSnapshotRef.current),
+                      content: value,
+                    });
+                  }
+                }}
+                modules={modules}
+                formats={formats}
+                placeholder="Write your story..."
               />
-            </svg>
-          </button>
-
-          {isStructuredOpen && (
-            <div className="mt-4 space-y-7">
-              <FaqRepeater
-                value={formData.faqs}
-                onChange={(v) => setFormData({ ...formData, faqs: v })}
-              />
-              <TakeawaysRepeater
-                value={formData.keyTakeaways}
-                onChange={(v) => setFormData({ ...formData, keyTakeaways: v })}
-              />
-              <RelatedPicker
-                value={formData.relatedSlugs}
-                currentSlug={formData.slug}
-                onChange={(v) => setFormData({ ...formData, relatedSlugs: v })}
-              />
-              <div className="flex flex-col gap-1.5">
-                <label
-                  className="text-[12px] uppercase tracking-wider text-gray-400"
-                  style={{ fontWeight: 600 }}
-                >
-                  Table of Contents
-                </label>
-                <TocEditor
-                  content={content}
-                  value={formData.tocOverrides}
-                  onChange={(v) => setFormData({ ...formData, tocOverrides: v })}
-                />
-              </div>
             </div>
-          )}
-        </div>
+          </div>
 
-        {/* ── SEO & Metadata ───────────────────── */}
-        <div className="mt-10 pt-8" style={{ borderTop: '1px solid rgba(0,0,0,0.06)' }}>
-          <button
-            type="button"
-            onClick={() => setIsSeoOpen(!isSeoOpen)}
-            className="flex items-center justify-between w-full text-left py-2 cursor-pointer"
-          >
-            <div className="flex items-center gap-2">
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="text-gray-400"
-              >
-                <circle cx="11" cy="11" r="8" />
-                <line x1="21" y1="21" x2="16.65" y2="16.65" />
-              </svg>
-              <span className="text-sm" style={{ fontWeight: 600, color: '#555' }}>
-                SEO & Metadata
-              </span>
-            </div>
-            <svg
-              className={`w-4 h-4 text-gray-400 transform transition-transform ${isSeoOpen ? 'rotate-180' : ''}`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+          {/* ── Author ──────────────────────────── */}
+          <div className="mt-14 pt-8 space-y-5" style={{ borderTop: '1px solid rgba(0,0,0,0.06)' }}>
+            <AuthorPicker
+              value={formData.authorId}
+              onChange={(id) => setFormData({ ...formData, authorId: id })}
+            />
+          </div>
+
+          {/* ── Structured content ──────────────── */}
+          <div className="mt-10 pt-8" style={{ borderTop: '1px solid rgba(0,0,0,0.06)' }}>
+            <button
+              type="button"
+              onClick={() => setIsStructuredOpen(!isStructuredOpen)}
+              className="flex items-center justify-between w-full text-left py-2 cursor-pointer"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2"
-                d="M19 9l-7 7-7-7"
-              />
-            </svg>
-          </button>
-
-          {isSeoOpen && (
-            <div className="mt-4 space-y-5">
-              <div className="flex flex-col gap-1.5">
-                <label
-                  className="text-[12px] uppercase tracking-wider text-gray-400"
-                  style={{ fontWeight: 600 }}
+              <div className="flex items-center gap-2">
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="text-gray-400"
                 >
-                  URL Slug
-                </label>
-                <div className="flex items-center gap-1 text-sm text-gray-400">
-                  <span>{site?.publicPaths.blogs ?? '/blogs'}/</span>
-                  <input
-                    type="text"
-                    name="slug"
-                    value={formData.slug}
-                    onChange={handleChange}
-                    className="flex-1 px-3 py-2 rounded-lg border bg-gray-50/50 focus:outline-none focus:ring-2 focus:ring-gray-200 text-[#1a1a1a] text-sm"
-                    style={{ borderColor: 'rgba(0,0,0,0.08)' }}
-                    placeholder="my-blog-post"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                <div className="flex flex-col gap-1.5">
-                  <label
-                    className="text-[12px] uppercase tracking-wider text-gray-400"
-                    style={{ fontWeight: 600 }}
-                  >
-                    Meta Title
-                  </label>
-                  <input
-                    type="text"
-                    name="metaTitle"
-                    value={formData.metaTitle}
-                    onChange={handleChange}
-                    className="px-3 py-2 rounded-lg border bg-gray-50/50 focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm"
-                    style={{ borderColor: 'rgba(0,0,0,0.08)' }}
-                    placeholder="Title for search engines"
-                  />
-                  <span className="text-[11px] text-gray-300">
-                    {formData.metaTitle.length}/60 characters
-                  </span>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <label
-                    className="text-[12px] uppercase tracking-wider text-gray-400"
-                    style={{ fontWeight: 600 }}
-                  >
-                    Publish Date
-                  </label>
-                  <input
-                    type="date"
-                    name="createdAt"
-                    value={formData.createdAt}
-                    onChange={handleChange}
-                    className="px-3 py-2 rounded-lg border bg-gray-50/50 focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm"
-                    style={{ borderColor: 'rgba(0,0,0,0.08)' }}
-                  />
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <label
-                  className="text-[12px] uppercase tracking-wider text-gray-400"
-                  style={{ fontWeight: 600 }}
-                >
-                  Meta Description
-                </label>
-                <textarea
-                  name="metaDescription"
-                  value={formData.metaDescription}
-                  onChange={handleChange}
-                  className="px-3 py-3 rounded-lg border bg-gray-50/50 focus:outline-none focus:ring-2 focus:ring-gray-200 min-h-[72px] text-sm"
-                  style={{ borderColor: 'rgba(0,0,0,0.08)' }}
-                  placeholder="A compelling summary for search results..."
-                />
-                <span className="text-[11px] text-gray-300">
-                  {formData.metaDescription.length}/160 characters
+                  <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" />
+                  <rect x="9" y="3" width="6" height="4" rx="1" />
+                  <line x1="9" y1="12" x2="15" y2="12" />
+                  <line x1="9" y1="16" x2="13" y2="16" />
+                </svg>
+                <span className="text-sm" style={{ fontWeight: 600, color: '#555' }}>
+                  Structured Content
                 </span>
               </div>
-
-              <div className="flex flex-col gap-1.5">
-                <label
-                  className="text-[12px] uppercase tracking-wider text-gray-400"
-                  style={{ fontWeight: 600 }}
-                >
-                  Keywords
-                </label>
-                <input
-                  type="text"
-                  name="keywords"
-                  value={formData.keywords}
-                  onChange={handleChange}
-                  className="px-3 py-2 rounded-lg border bg-gray-50/50 focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm"
-                  style={{ borderColor: 'rgba(0,0,0,0.08)' }}
-                  placeholder="ai, analysis, visibility"
+              <svg
+                className={`w-4 h-4 text-gray-400 transform transition-transform ${isStructuredOpen ? 'rotate-180' : ''}`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M19 9l-7 7-7-7"
                 />
+              </svg>
+            </button>
+
+            {isStructuredOpen && (
+              <div className="mt-4 space-y-7">
+                <FaqRepeater
+                  value={formData.faqs}
+                  onChange={(v) => setFormData({ ...formData, faqs: v })}
+                />
+                <TakeawaysRepeater
+                  value={formData.keyTakeaways}
+                  onChange={(v) => setFormData({ ...formData, keyTakeaways: v })}
+                />
+                <RelatedPicker
+                  value={formData.relatedSlugs}
+                  currentSlug={formData.slug}
+                  onChange={(v) => setFormData({ ...formData, relatedSlugs: v })}
+                />
+                <div className="flex flex-col gap-1.5">
+                  <label
+                    className="text-[12px] uppercase tracking-wider text-gray-400"
+                    style={{ fontWeight: 600 }}
+                  >
+                    Table of Contents
+                  </label>
+                  <TocEditor
+                    content={content}
+                    value={formData.tocOverrides}
+                    onChange={(v) => setFormData({ ...formData, tocOverrides: v })}
+                  />
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
+
+          {/* ── SEO & Metadata ───────────────────── */}
+          <div className="mt-10 pt-8" style={{ borderTop: '1px solid rgba(0,0,0,0.06)' }}>
+            <button
+              type="button"
+              onClick={() => setIsSeoOpen(!isSeoOpen)}
+              className="flex items-center justify-between w-full text-left py-2 cursor-pointer"
+            >
+              <div className="flex items-center gap-2">
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="text-gray-400"
+                >
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+                <span className="text-sm" style={{ fontWeight: 600, color: '#555' }}>
+                  SEO & Metadata
+                </span>
+              </div>
+              <svg
+                className={`w-4 h-4 text-gray-400 transform transition-transform ${isSeoOpen ? 'rotate-180' : ''}`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M19 9l-7 7-7-7"
+                />
+              </svg>
+            </button>
+
+            {isSeoOpen && (
+              <div className="mt-4 space-y-5">
+                <div className="flex flex-col gap-1.5">
+                  <label
+                    className="text-[12px] uppercase tracking-wider text-gray-400"
+                    style={{ fontWeight: 600 }}
+                  >
+                    URL Slug
+                  </label>
+                  <div className="flex items-center gap-1 text-sm text-gray-400">
+                    <span>{site?.publicPaths.blogs ?? '/blogs'}/</span>
+                    <input
+                      type="text"
+                      name="slug"
+                      value={formData.slug}
+                      onChange={handleChange}
+                      className="flex-1 px-3 py-2 rounded-lg border bg-gray-50/50 focus:outline-none focus:ring-2 focus:ring-gray-200 text-[#1a1a1a] text-sm"
+                      style={{ borderColor: slugInvalid ? '#dc2626' : 'rgba(0,0,0,0.08)' }}
+                      placeholder="my-blog-post"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <div className="flex flex-col gap-1.5">
+                    <label
+                      className="text-[12px] uppercase tracking-wider text-gray-400"
+                      style={{ fontWeight: 600 }}
+                    >
+                      Meta Title
+                    </label>
+                    <input
+                      type="text"
+                      name="metaTitle"
+                      value={formData.metaTitle}
+                      onChange={handleChange}
+                      className="px-3 py-2 rounded-lg border bg-gray-50/50 focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm"
+                      style={{ borderColor: 'rgba(0,0,0,0.08)' }}
+                      placeholder="Title for search engines"
+                    />
+                    <span className="text-[11px] text-gray-300">
+                      {formData.metaTitle.length}/60 characters
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label
+                      className="text-[12px] uppercase tracking-wider text-gray-400"
+                      style={{ fontWeight: 600 }}
+                    >
+                      Publish Date
+                    </label>
+                    <input
+                      type="date"
+                      name="createdAt"
+                      value={formData.createdAt}
+                      onChange={handleChange}
+                      className="px-3 py-2 rounded-lg border bg-gray-50/50 focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm"
+                      style={{ borderColor: 'rgba(0,0,0,0.08)' }}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label
+                    className="text-[12px] uppercase tracking-wider text-gray-400"
+                    style={{ fontWeight: 600 }}
+                  >
+                    Meta Description
+                  </label>
+                  <textarea
+                    name="metaDescription"
+                    value={formData.metaDescription}
+                    onChange={handleChange}
+                    className="px-3 py-3 rounded-lg border bg-gray-50/50 focus:outline-none focus:ring-2 focus:ring-gray-200 min-h-[72px] text-sm"
+                    style={{ borderColor: 'rgba(0,0,0,0.08)' }}
+                    placeholder="A compelling summary for search results..."
+                  />
+                  <span className="text-[11px] text-gray-300">
+                    {formData.metaDescription.length}/160 characters
+                  </span>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label
+                    className="text-[12px] uppercase tracking-wider text-gray-400"
+                    style={{ fontWeight: 600 }}
+                  >
+                    Keywords
+                  </label>
+                  <input
+                    type="text"
+                    name="keywords"
+                    value={formData.keywords}
+                    onChange={handleChange}
+                    className="px-3 py-2 rounded-lg border bg-gray-50/50 focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm"
+                    style={{ borderColor: 'rgba(0,0,0,0.08)' }}
+                    placeholder="ai, analysis, visibility"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </main>
 
@@ -1605,9 +1792,14 @@ function EditorForm() {
         <GraphicEditorModal
           initial={graphicModal.config}
           onSave={handleSaveGraphic}
+          onRemove={graphicModal.editIndex != null ? handleRemoveGraphic : undefined}
           onClose={() => setGraphicModal(null)}
         />
       )}
+      {promptRequest && (
+        <PromptDialog request={promptRequest} onClose={() => setPromptRequest(null)} />
+      )}
+      <ConfirmDialog {...leaveGuard.dialogProps} />
     </div>
   );
 }

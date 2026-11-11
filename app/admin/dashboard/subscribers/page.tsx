@@ -1,7 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useSite } from '@/components/admin/site-provider';
+import { useToast } from '@/components/admin/toast-provider';
+import { TOAST_MESSAGES } from '@/components/admin/toast-messages';
 
 interface Subscriber {
   _id: string;
@@ -16,7 +19,7 @@ export default function SubscribersPage() {
   const site = useSite();
   const [subscribers, setSubscribers] = useState<Subscriber[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { showToast } = useToast();
 
   useEffect(() => {
     if (!site?.id) {
@@ -27,85 +30,142 @@ export default function SubscribersPage() {
 
     const controller = new AbortController();
     setLoading(true);
-    setError(null);
     fetch('/api/admin/newsletter-subscribers', {
       cache: 'no-store',
       signal: controller.signal,
     })
       .then(async (response) => {
         const body = await response.json();
-        if (!response.ok) throw new Error(body.error || 'Could not load subscribers.');
+        if (!response.ok) throw new Error(body.error || TOAST_MESSAGES.subscribers.listLoadFailed);
         setSubscribers(Array.isArray(body) ? body : []);
       })
       .catch((reason) => {
         if (reason instanceof DOMException && reason.name === 'AbortError') return;
-        setError(reason instanceof Error ? reason.message : 'Could not load subscribers.');
+        showToast(
+          'error',
+          reason instanceof Error ? reason.message : TOAST_MESSAGES.subscribers.listLoadFailed,
+        );
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [site?.id]);
+  }, [site?.id, showToast]);
 
   return (
-    <section className="mx-auto max-w-6xl px-5 py-10 sm:px-8 sm:py-14">
-      <div className="flex flex-col gap-4 border-b border-stone-200 pb-7 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-sm font-medium text-orange-700">{site?.name}</p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Subscribers</h1>
-          <p className="mt-2 text-sm text-stone-600">
-            Site-scoped newsletter signups and repeat submissions.
-          </p>
+    <div className="min-h-screen bg-[#FDFAF7] text-[#1a1a1a]">
+      <div className="max-w-6xl mx-auto px-8 py-12">
+        <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center gap-4">
+            <Link
+              href="/admin/dashboard"
+              className="text-gray-400 hover:text-gray-800 transition-colors"
+            >
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M19 12H5M12 19l-7-7 7-7" />
+              </svg>
+            </Link>
+            <h1
+              className="text-2xl md:text-3xl"
+              style={{
+                fontWeight: 600,
+                color: '#1a1a1a',
+                letterSpacing: '-0.03em',
+              }}
+            >
+              Manage Subscribers
+            </h1>
+            {/* Previous header lines, kept for reference:
+            <p className="text-sm font-medium text-orange-700">{site?.name}</p>
+            <p className="mt-2 text-sm text-stone-600">
+              Site-scoped newsletter signups and repeat submissions.
+            </p>
+            */}
+          </div>
+          <a
+            href="/api/admin/newsletter-subscribers?format=csv"
+            className="px-5 py-2.5 text-white rounded-xl shadow-md hover:shadow-lg transition-all text-sm"
+            style={{
+              background: 'linear-gradient(135deg, #FF751F, #ff9044)',
+              fontWeight: 600,
+              boxShadow: '0 4px 16px rgba(255,117,31,0.25)',
+            }}
+          >
+            Export CSV
+          </a>
         </div>
-        <a
-          href="/api/admin/newsletter-subscribers?format=csv"
-          className="w-fit rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-stone-800 hover:border-orange-300 hover:text-orange-700"
-        >
-          Export CSV
-        </a>
-      </div>
 
-      {error ? (
-        <p className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          {error}
-        </p>
-      ) : null}
-      <div className="mt-8 overflow-x-auto rounded-2xl border border-stone-200 bg-white shadow-sm">
-        {loading ? (
-          <p className="p-8 text-sm text-stone-500">Loading subscribers…</p>
-        ) : subscribers.length === 0 ? (
-          <p className="p-8 text-sm text-stone-500">No newsletter subscribers for this site.</p>
-        ) : (
-          <table className="min-w-full text-left text-sm">
-            <thead className="border-b border-stone-200 bg-stone-50 text-xs uppercase tracking-wide text-stone-500">
-              <tr>
-                <th className="px-5 py-3 font-semibold">Email</th>
-                <th className="px-5 py-3 font-semibold">Source</th>
-                <th className="px-5 py-3 font-semibold">Submissions</th>
-                <th className="px-5 py-3 font-semibold">First subscribed</th>
-                <th className="px-5 py-3 font-semibold">Latest</th>
-              </tr>
-            </thead>
-            <tbody>
-              {subscribers.map((subscriber) => (
-                <tr key={subscriber._id} className="border-b border-stone-100 last:border-0">
-                  <td className="px-5 py-4 font-medium text-stone-900">{subscriber.email}</td>
-                  <td className="px-5 py-4 text-stone-600">{subscriber.source}</td>
-                  <td className="px-5 py-4 tabular-nums text-stone-600">
-                    {subscriber.submitCount}
-                  </td>
-                  <td className="px-5 py-4 text-stone-600">
-                    {new Date(subscriber.firstSubscribedAt).toLocaleDateString()}
-                  </td>
-                  <td className="px-5 py-4 text-stone-600">
-                    {new Date(subscriber.lastSubscribedAt).toLocaleDateString()}
-                  </td>
+        <div
+          className="rounded-2xl border overflow-x-auto"
+          style={{
+            backgroundColor: 'rgba(255,255,255,0.7)',
+            backdropFilter: 'blur(16px)',
+            borderColor: 'rgba(0,0,0,0.06)',
+            boxShadow: '0 4px 24px rgba(0,0,0,0.03)',
+          }}
+        >
+          {loading ? (
+            <p className="p-8 text-gray-500 text-center">Loading subscribers...</p>
+          ) : subscribers.length === 0 ? (
+            <div className="p-12 text-center">
+              <p className="text-gray-400 mb-2">No subscribers found.</p>
+              <p className="text-sm text-gray-400">
+                Signups from this site&apos;s newsletter form will appear here.
+              </p>
+            </div>
+          ) : (
+            <table className="min-w-full text-left text-sm">
+              <thead>
+                <tr
+                  className="text-[11px] uppercase tracking-wider text-gray-400"
+                  style={{ borderBottom: '1px solid rgba(0,0,0,0.06)' }}
+                >
+                  <th className="px-6 py-3 font-semibold">Email</th>
+                  <th className="px-6 py-3 font-semibold">Source</th>
+                  <th className="px-6 py-3 font-semibold">Submissions</th>
+                  <th className="px-6 py-3 font-semibold">First subscribed</th>
+                  <th className="px-6 py-3 font-semibold">Latest</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+              </thead>
+              <tbody>
+                {subscribers.map((subscriber, i) => (
+                  <tr
+                    key={subscriber._id}
+                    className="hover:bg-white/60 transition-colors"
+                    style={{
+                      borderBottom:
+                        i < subscribers.length - 1 ? '1px solid rgba(0,0,0,0.04)' : 'none',
+                    }}
+                  >
+                    <td className="px-6 py-5 text-[#1a1a1a]" style={{ fontWeight: 600 }}>
+                      {subscriber.email}
+                    </td>
+                    <td className="px-6 py-5 text-gray-500">{subscriber.source}</td>
+                    <td className="px-6 py-5 tabular-nums text-gray-500">
+                      {subscriber.submitCount}
+                    </td>
+                    <td className="px-6 py-5 text-gray-500">
+                      {new Date(subscriber.firstSubscribedAt).toLocaleDateString()}
+                    </td>
+                    <td className="px-6 py-5 text-gray-500">
+                      {new Date(subscriber.lastSubscribedAt).toLocaleDateString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
-    </section>
+    </div>
   );
 }

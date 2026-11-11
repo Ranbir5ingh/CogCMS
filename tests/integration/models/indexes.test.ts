@@ -28,6 +28,7 @@ describe('model registry and indexes', () => {
       'users',
       'login_attempts',
       'blogs',
+      'events',
       'authors',
       'faqs',
       'faq_submissions',

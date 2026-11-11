@@ -11,11 +11,13 @@ curl -H "Authorization: Bearer $CMS_API_KEY" "$CMS_ORIGIN/api/v1/posts?limit=20&
 curl -H "Authorization: Bearer $CMS_API_KEY" "$CMS_ORIGIN/api/v1/posts/example-post?include=author,related,jsonLd"
 ```
 
+Events are available at `/api/v1/events` and `/api/v1/events/<slug>`. Posts include `imageAlt` (cover image alt text, empty string when unset); responses carry `X-CMS-Version: 1.1`.
+
 Lists return `{data, meta}` with page/limit metadata; singles return `{data}`. Only published records for that key's site are returned. Read the schemas under `contracts/v1` for exact fields. `packages/cms-client` provides the typed fetch client; `npm run sync:client -- <target-directory>` copies it and the contract into a consumer.
 
 ## MongoDB views
 
-For server-side MongoDB consumers, provision the six per-site published views and a find-only reader identity using the [versioned view contract](../contracts/mongo-v1/README.md). Never give a website the CMS runtime or operator identity. Browser code must not contain a database URI.
+For server-side MongoDB consumers, provision the seven per-site published views and a find-only reader identity using the [versioned view contract](../contracts/mongo-v1/README.md). Never give a website the CMS runtime or operator identity. Browser code must not contain a database URI.
 
 ## Changes and intake
 

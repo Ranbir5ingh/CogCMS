@@ -18,7 +18,7 @@ CMS CONFIGURATION — request these from the CMS administrator/operator:
 - CMS origin: [your CMS origin, e.g. https://cms.example.com]
 - Immutable CMS site ID and slug: [provided after site creation]
 - Agreed content read mode: [Atlas published views; API alternative only if agreed]
-- For Atlas: database name, exact six view names and secret-manager reference for a site-restricted, find-only reader URI.
+- For Atlas: database name, exact seven view names and secret-manager reference for a site-restricted, find-only reader URI.
 - For API reads: secret-manager reference for this site's content:read key.
 - For forms: separate secret-manager reference for this site's intake:write key.
 - Public media origin and media prefix: [operator-provided]

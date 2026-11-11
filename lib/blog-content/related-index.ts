@@ -38,6 +38,7 @@ const relatedPostIndex = new RelatedPostIndex<IBlog>(async (siteId) =>
       excerpt: 1,
       metaDescription: 1,
       imageUrl: 1,
+      imageAlt: 1,
       tag: 1,
       category: 1,
       tags: 1,

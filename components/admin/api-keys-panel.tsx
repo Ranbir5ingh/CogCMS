@@ -3,6 +3,10 @@
 import { useEffect, useState, useTransition } from 'react';
 import type { ApiKeyView } from '@/lib/auth/api-key';
 import type { ApiKeyScope } from '@/models/ApiKey';
+import { useToast } from '@/components/admin/toast-provider';
+import { TOAST_MESSAGES } from '@/components/admin/toast-messages';
+import { CopyButton } from '@/components/admin/copy-button';
+import { ConfirmDialog } from '@/components/admin/confirm-dialog';
 
 type IssuedKey = { key: ApiKeyView; plaintext: string };
 
@@ -11,8 +15,9 @@ export function ApiKeysPanel({ siteId }: { siteId: string }) {
   const [name, setName] = useState('Website');
   const [scopes, setScopes] = useState<ApiKeyScope[]>(['content:read']);
   const [issued, setIssued] = useState<IssuedKey | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [keyToRevoke, setKeyToRevoke] = useState<ApiKeyView | null>(null);
   const [pending, startTransition] = useTransition();
+  const { showToast } = useToast();
 
   const load = async () => {
     const response = await fetch(`/api/admin/sites/${siteId}/api-keys`, { cache: 'no-store' });
@@ -21,13 +26,11 @@ export function ApiKeysPanel({ siteId }: { siteId: string }) {
   };
 
   useEffect(() => {
-    void load().catch((cause) =>
-      setError(cause instanceof Error ? cause.message : 'Unable to load API keys'),
-    );
+    void load().catch(() => showToast('error', TOAST_MESSAGES.sites.keysLoadFailed));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [siteId]);
 
-  const mutate = (url: string, method: 'POST' | 'DELETE', body: unknown) => {
-    setError(null);
+  const mutate = (url: string, method: 'POST' | 'DELETE', body: unknown, success?: string) => {
     startTransition(async () => {
       const response = await fetch(url, {
         method,
@@ -36,10 +39,11 @@ export function ApiKeysPanel({ siteId }: { siteId: string }) {
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
-        setError(payload?.error ?? 'The API key operation failed.');
+        showToast('error', payload?.error ?? TOAST_MESSAGES.sites.keyOperationFailed);
         return;
       }
       if (payload?.plaintext) setIssued(payload as IssuedKey);
+      if (success) showToast('success', success);
       await load();
     });
   };
@@ -66,27 +70,21 @@ export function ApiKeysPanel({ siteId }: { siteId: string }) {
           <code className="mt-2 block overflow-x-auto rounded-lg bg-stone-950 px-3 py-2 text-xs text-stone-50">
             {issued.plaintext}
           </code>
-          <button
-            type="button"
-            onClick={() => void navigator.clipboard.writeText(issued.plaintext)}
+          <CopyButton
+            value={issued.plaintext}
             className="mt-3 text-sm font-semibold text-amber-900 underline"
-          >
-            Copy key
-          </button>
+          />
         </div>
-      ) : null}
-
-      {error ? (
-        <p role="alert" className="text-sm text-red-700">
-          {error}
-        </p>
       ) : null}
 
       <form
         className="grid gap-4 sm:grid-cols-[1fr_auto]"
         onSubmit={(event) => {
           event.preventDefault();
-          if (scopes.length === 0) return setError('Select at least one scope.');
+          if (scopes.length === 0) {
+            showToast('error', TOAST_MESSAGES.sites.scopeRequired);
+            return;
+          }
           mutate(`/api/admin/sites/${siteId}/api-keys`, 'POST', { name, scopes });
         }}
       >
@@ -147,7 +145,14 @@ export function ApiKeysPanel({ siteId }: { siteId: string }) {
                 <button
                   type="button"
                   disabled={pending}
-                  onClick={() => mutate(`/api/admin/api-keys/${key.id}/rotate`, 'POST', {})}
+                  onClick={() =>
+                    mutate(
+                      `/api/admin/api-keys/${key.id}/rotate`,
+                      'POST',
+                      {},
+                      TOAST_MESSAGES.sites.keyRotated,
+                    )
+                  }
                   className="rounded-lg border border-stone-300 px-3 py-2 text-xs font-semibold hover:bg-stone-50"
                 >
                   Rotate
@@ -155,10 +160,7 @@ export function ApiKeysPanel({ siteId }: { siteId: string }) {
                 <button
                   type="button"
                   disabled={pending}
-                  onClick={() => {
-                    if (window.confirm(`Revoke ${key.name}? Consumers using it will lose access.`))
-                      mutate(`/api/admin/api-keys/${key.id}`, 'DELETE', {});
-                  }}
+                  onClick={() => setKeyToRevoke(key)}
                   className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50"
                 >
                   Revoke
@@ -168,6 +170,25 @@ export function ApiKeysPanel({ siteId }: { siteId: string }) {
           </div>
         ))}
       </div>
+
+      {/* Same confirmation card the blog list uses for deletes. */}
+      <ConfirmDialog
+        open={!!keyToRevoke}
+        onOpenChange={(open) => !open && setKeyToRevoke(null)}
+        onConfirm={() => {
+          if (keyToRevoke)
+            mutate(
+              `/api/admin/api-keys/${keyToRevoke.id}`,
+              'DELETE',
+              {},
+              TOAST_MESSAGES.sites.keyRevoked,
+            );
+          setKeyToRevoke(null);
+        }}
+        title={`Revoke ${keyToRevoke?.name}?`}
+        description="Consumers using this key will lose access immediately. This cannot be undone — issue a new key to restore access."
+        confirmLabel="Yes, revoke it"
+      />
     </section>
   );
 }

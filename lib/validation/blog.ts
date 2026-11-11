@@ -10,6 +10,7 @@ export const blogInputSchema = z
     content: z.string().min(1),
     excerpt: z.string().optional(),
     imageUrl: z.string().optional(),
+    imageAlt: z.string().max(300).optional(),
     tag: z.string().optional(),
     status: z.enum(['draft', 'publish']).optional(),
     metaTitle: z.string().optional(),

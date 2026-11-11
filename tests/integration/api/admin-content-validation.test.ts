@@ -117,6 +117,90 @@ describe('Phase C content validation and auditing', () => {
     expect(await Author.findById(author._id)).not.toBeNull();
   });
 
+  it('prevents deleting an author used by a draft blog', async () => {
+    const admin = await createTestUser();
+    const site = await createTestSite();
+    await createAuthor(
+      await authenticatedRequest('http://localhost:3003/api/admin/authors', {
+        user: admin,
+        siteId: site._id.toString(),
+        method: 'POST',
+        json: { name: 'Draft author', slug: 'draft-author', status: 'publish' },
+      }),
+      rootContext,
+    );
+    const author = await Author.findOne({ siteId: site._id, slug: 'draft-author' }).exec();
+    await createBlog(
+      await authenticatedRequest('http://localhost:3003/api/admin/blogs', {
+        user: admin,
+        siteId: site._id.toString(),
+        method: 'POST',
+        json: {
+          title: 'Unfinished post',
+          slug: 'unfinished-post',
+          content: '<p>Draft</p>',
+          status: 'draft',
+          authorId: author!._id.toString(),
+        },
+      }),
+      rootContext,
+    );
+
+    const response = await deleteAuthor(
+      await authenticatedRequest(`http://localhost:3003/api/admin/authors/${author!.slug}`, {
+        user: admin,
+        siteId: site._id.toString(),
+        method: 'DELETE',
+      }),
+      { params: Promise.resolve({ slug: author!.slug }) },
+    );
+
+    expect(response.status).toBe(409);
+    expect(await Author.findById(author!._id)).not.toBeNull();
+  });
+
+  it('still allows unpublishing an author whose only blog is a draft', async () => {
+    const admin = await createTestUser();
+    const site = await createTestSite();
+    await createAuthor(
+      await authenticatedRequest('http://localhost:3003/api/admin/authors', {
+        user: admin,
+        siteId: site._id.toString(),
+        method: 'POST',
+        json: { name: 'Quiet author', slug: 'quiet-author', status: 'publish' },
+      }),
+      rootContext,
+    );
+    const author = await Author.findOne({ siteId: site._id, slug: 'quiet-author' }).exec();
+    await createBlog(
+      await authenticatedRequest('http://localhost:3003/api/admin/blogs', {
+        user: admin,
+        siteId: site._id.toString(),
+        method: 'POST',
+        json: {
+          title: 'Quiet draft',
+          slug: 'quiet-draft',
+          content: '<p>Draft</p>',
+          status: 'draft',
+          authorId: author!._id.toString(),
+        },
+      }),
+      rootContext,
+    );
+
+    const response = await updateAuthor(
+      await authenticatedRequest(`http://localhost:3003/api/admin/authors/${author!.slug}`, {
+        user: admin,
+        siteId: site._id.toString(),
+        method: 'PUT',
+        json: { status: 'draft' },
+      }),
+      { params: Promise.resolve({ slug: author!.slug }) },
+    );
+
+    expect(response.status).toBe(200);
+  });
+
   it('rejects invalid FAQ order and audits a valid draft', async () => {
     const admin = await createTestUser();
     const site = await createTestSite();

@@ -8,6 +8,7 @@ Namespaces are `cms_v1_<canonical-site-ObjectId>_<kind>`. ObjectIds and dates re
 | ------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | site          | sites         | Identity, public paths, publisher, locale, media prefix, updatedAt                                                               |
 | posts         | blogs         | Card/SEO fields, published dates, author ID, related slugs, explicit FAQ/TOC fields, stored rendered HTML/TOC/read-time snapshot |
+| events        | events        | Event content, schedule, venue, registration link, speakers, and SEO fields |
 | authors       | authors       | Public profile and explicit x/linkedin/website social URLs                                                                       |
 | faqs          | faqs          | Question, answer, category, order, createdAt, updatedAt                                                                          |
 | whitepapers   | whitepapers   | Public metadata and content needed to derive public blocks                                                                       |
@@ -28,9 +29,9 @@ npm run ensure:published-views -- --site <site-ObjectId>
 npm run ensure:published-views -- --site <site-ObjectId> --write
 ```
 
-Default is dry-run. The command validates the site and preflights all six names before creating missing views. Identical existing definitions are unchanged; an ordinary collection, different source/pipeline or non-simple collation causes refusal. It never drops or modifies existing definitions. Output contains names/actions and reader privilege specifications, never credentials. Database-user creation is a separate Atlas operator action.
+Default is dry-run. The command validates the site and preflights all seven names before creating missing views. Identical existing definitions are unchanged; an ordinary collection, different source/pipeline or non-simple collation causes refusal. It never drops or modifies existing definitions. Output contains names/actions and reader privilege specifications, never credentials. Database-user creation is a separate Atlas operator action.
 
-Serialize operator runs: a concurrent creator may cause a later create to fail after earlier new views were created. Rerun safely; do not imply an atomic six-view transaction. A known preflight collision causes no writes. Versioned view changes require a reviewed reconciliation/migration, not `--force`.
+Serialize operator runs: a concurrent creator may cause a later create to fail after earlier new views were created. Rerun safely; do not imply an atomic seven-view transaction. A known preflight collision causes no writes. Versioned view changes require a reviewed reconciliation/migration, not `--force`.
 
 Create source collections and indexes with the operator before runtime traffic. Provision a site's views and restricted user before onboarding its website; the CMS editor does not create Atlas users. Preview and production have separate databases/users, even for identical site IDs.
 

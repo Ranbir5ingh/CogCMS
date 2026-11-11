@@ -5,6 +5,7 @@ import connectToDatabase from '@/lib/mongodb';
 import Author from '@/models/Author';
 import ApiKey from '@/models/ApiKey';
 import Blog from '@/models/Blog';
+import Event from '@/models/Event';
 import LoginAttempt from '@/models/LoginAttempt';
 import NewsletterSubscriber from '@/models/NewsletterSubscriber';
 import ReleaseNote from '@/models/ReleaseNote';
@@ -20,6 +21,7 @@ const uniqueChecks: UniqueCheck[] = [
   { model: User, fields: ['email'] },
   { model: LoginAttempt, fields: ['key'] },
   { model: Blog, fields: ['siteId', 'slug'] },
+  { model: Event, fields: ['siteId', 'slug'] },
   { model: Author, fields: ['siteId', 'slug'] },
   { model: Whitepaper, fields: ['siteId', 'slug'] },
   { model: NewsletterSubscriber, fields: ['siteId', 'email'] },

@@ -5,7 +5,7 @@ import { authorUpdateSchema } from '@/lib/validation/author';
 import { readJson, withAdmin } from '@/lib/http/admin-handler';
 import { notFound, validationError } from '@/lib/http/errors';
 import { deliveryEventType, notifySiteWebhook } from '@/lib/webhook';
-import { assertAuthorNotUsedByPublishedBlogs } from '@/lib/admin/author-policy';
+import { assertAuthorNotUsedByBlogs } from '@/lib/admin/author-policy';
 
 export const dynamic = 'force-dynamic';
 type Params = { slug: string };
@@ -29,7 +29,7 @@ export const PUT = withAdmin<Params>(async (req, { params, user, site }) => {
   const existing = await Author.findOne({ slug, siteId: site.id }).exec();
   if (!existing) throw notFound('Author');
   if (status === 'draft' && existing.status === 'publish') {
-    await assertAuthorNotUsedByPublishedBlogs(site.id, existing._id.toString());
+    await assertAuthorNotUsedByBlogs(site.id, existing._id.toString(), 'published');
   }
   const update: Record<string, unknown> = { ...data, updatedBy: user.id };
   if (status !== undefined) update.status = status;
@@ -57,7 +57,7 @@ export const DELETE = withAdmin<Params>(async (_req, { params, site }) => {
   await connectToDatabase();
   const existing = await Author.findOne({ slug, siteId: site.id }).exec();
   if (!existing) throw notFound('Author');
-  await assertAuthorNotUsedByPublishedBlogs(site.id, existing._id.toString());
+  await assertAuthorNotUsedByBlogs(site.id, existing._id.toString(), 'any');
   const author = await Author.findOneAndDelete({ _id: existing._id, siteId: site.id }).exec();
   if (!author) throw notFound('Author');
   if (author.status === 'publish') {

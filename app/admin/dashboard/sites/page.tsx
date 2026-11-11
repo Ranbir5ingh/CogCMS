@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import type { AdminSiteView } from '@/lib/admin/serializers';
+import { RowActionsMenu, ROW_ACTION_ITEM_CLASS } from '@/components/admin/row-actions-menu';
 
 export default function SitesPage() {
   const [sites, setSites] = useState<AdminSiteView[]>([]);
@@ -118,9 +119,8 @@ export default function SitesPage() {
         ) : null}
         {state === 'ready'
           ? visible.map((site) => (
-              <Link
+              <div
                 key={site.id}
-                href={`/admin/dashboard/sites/${site.id}`}
                 className="flex items-center justify-between gap-4 border-b border-stone-100 px-5 py-4 last:border-b-0 hover:bg-stone-50"
               >
                 <span className="min-w-0">
@@ -129,12 +129,22 @@ export default function SitesPage() {
                     {site.primaryDomain}
                   </span>
                 </span>
-                <span
-                  className={`rounded-full px-2.5 py-1 text-xs font-medium ${site.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-stone-100 text-stone-600'}`}
-                >
-                  {site.status}
+                <span className="flex items-center gap-2">
+                  <span
+                    className={`rounded-full px-2.5 py-1 text-xs font-medium ${site.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-stone-100 text-stone-600'}`}
+                  >
+                    {site.status}
+                  </span>
+                  <RowActionsMenu label={`Actions for ${site.name}`}>
+                    <Link
+                      href={`/admin/dashboard/sites/${site.id}`}
+                      className={ROW_ACTION_ITEM_CLASS}
+                    >
+                      Edit
+                    </Link>
+                  </RowActionsMenu>
                 </span>
-              </Link>
+              </div>
             ))
           : null}
       </div>

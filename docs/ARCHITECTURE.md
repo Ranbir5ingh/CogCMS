@@ -6,4 +6,6 @@ Blogs are rendered and sanitized on save; published snapshots are returned throu
 
 `GET /api/admin/blogs` currently fetches every full blog for the active site. The Blogs page then searches and filters that array in the browser. Server-side pagination is an improvement opportunity described in the optional [assignment](../ASSIGNMENT.md).
 
+Events are site-scoped content with the same admin, published-only `/api/v1/events` and per-site MongoDB view boundaries as other content. Posts carry optional cover image alt text (`imageAlt`), an additive `/api/v1` change (`X-CMS-Version: 1.1`).
+
 Optional publishing and media integrations support installations beyond the local demo. Deployment tools require explicit operator targets. The legacy website importer is an optional adapter for a specific source schema, not a universal importer. Private installation records and company content are excluded from the public distribution.

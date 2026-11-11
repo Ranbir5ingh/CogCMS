@@ -9,6 +9,7 @@ export const postSummarySchema = z
     slug: z.string(),
     excerpt: z.string(),
     imageUrl: z.string(),
+    imageAlt: z.string(),
     tag: z.string(),
     category: z.string(),
     tags: z.array(z.string()),
