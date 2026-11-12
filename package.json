@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "next dev -p 3003",
+    "dev:mongo": "node scripts/dev-replset.mjs",
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
