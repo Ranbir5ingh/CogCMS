@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server';
 import { getEnv } from '@/lib/env';
 import { forbidden, validationError } from '@/lib/http/errors';
 
-export type AdminContentType = 'json' | 'multipart';
+export type AdminContentType = 'json' | 'multipart' | 'jsonOrText';
 
 function originOf(value: string): string | null {
   try {
@@ -24,12 +24,18 @@ function requestHostOrigin(request: NextRequest): string {
 function assertContentType(request: NextRequest, expected: AdminContentType): void {
   const raw = request.headers.get('content-type') ?? '';
   const mediaType = raw.split(';', 1)[0]?.trim().toLowerCase();
+  if (expected === 'jsonOrText') {
+    if (mediaType !== 'application/json' && mediaType !== 'text/plain') {
+      throw validationError(
+        { contentType: raw || null },
+        'Content-Type must be application/json or text/plain',
+      );
+    }
+    return;
+  }
   const required = expected === 'multipart' ? 'multipart/form-data' : 'application/json';
   if (mediaType !== required) {
-    throw validationError(
-      { contentType: raw || null },
-      `Content-Type must be ${required}`,
-    );
+    throw validationError({ contentType: raw || null }, `Content-Type must be ${required}`);
   }
 }
 

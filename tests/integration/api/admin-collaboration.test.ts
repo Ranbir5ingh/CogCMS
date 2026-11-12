@@ -37,11 +37,7 @@ async function seedBlog(admin: IUser, siteId: string, slug = 'collab-post') {
   return created.json();
 }
 
-function resourceUrl(
-  path: string,
-  resourceType: string,
-  resourceId: string,
-): string {
+function resourceUrl(path: string, resourceType: string, resourceId: string): string {
   const url = new URL(`http://localhost:3003/api/admin/collaboration${path}`);
   url.searchParams.set('resourceType', resourceType);
   url.searchParams.set('resourceId', resourceId);
@@ -51,7 +47,12 @@ function resourceUrl(
 async function call(
   user: IUser,
   path: string,
-  options: { method?: string; siteId?: string; json?: unknown; headers?: Record<string, string> } = {},
+  options: {
+    method?: string;
+    siteId?: string;
+    json?: unknown;
+    headers?: Record<string, string>;
+  } = {},
 ) {
   return authenticatedRequest(`http://localhost:3003${path}`, { user, ...options });
 }
@@ -126,10 +127,12 @@ describe('admin live collaboration', () => {
     expect(beat.status).toBe(200);
     const beatBody = await beat.json();
     expect(beatBody.lock.userId).toBe(alice._id.toString());
-    expect(Date.parse(beatBody.lock.expiresAt)).toBeGreaterThan(Date.parse(aliceLock.lock.expiresAt) - 1);
-    expect(beatBody.presence.some((row: { userId: string }) => row.userId === alice._id.toString())).toBe(
-      true,
+    expect(Date.parse(beatBody.lock.expiresAt)).toBeGreaterThan(
+      Date.parse(aliceLock.lock.expiresAt) - 1,
     );
+    expect(
+      beatBody.presence.some((row: { userId: string }) => row.userId === alice._id.toString()),
+    ).toBe(true);
 
     const bobBeat = await heartbeat(
       await call(bob, '/api/admin/collaboration/heartbeat', {
@@ -200,6 +203,36 @@ describe('admin live collaboration', () => {
     );
     expect(aliceLost.status).toBe(200);
     expect((await aliceLost.json()).lock.userId).toBe(bob._id.toString());
+  });
+
+  it('accepts a text/plain lock release so a closing tab can use sendBeacon', async () => {
+    const alice = await createTestUser({ email: 'alice-beacon@example.com' });
+    const site = await createTestSite();
+    const siteId = site._id.toString();
+    const blog = await seedBlog(alice, siteId, 'beacon-story');
+    const resource = { resourceType: 'blog', resourceId: blog._id };
+
+    const acquired = await lockAction(
+      await call(alice, '/api/admin/collaboration/locks', {
+        siteId,
+        method: 'POST',
+        json: { ...resource, action: 'acquire' },
+      }),
+      root,
+    );
+    expect(acquired.status).toBe(200);
+
+    const released = await lockAction(
+      await call(alice, '/api/admin/collaboration/locks', {
+        siteId,
+        method: 'POST',
+        json: { ...resource, action: 'release' },
+        headers: { 'content-type': 'text/plain' },
+      }),
+      root,
+    );
+    expect(released.status).toBe(200);
+    expect((await released.json()).lock).toBeNull();
   });
 
   it('scopes comments by site, supports resolve and delete, and rejects CSRF or anonymous writes', async () => {
@@ -346,7 +379,6 @@ describe('admin live collaboration', () => {
       root,
     );
     expect(anonymous.status).toBe(401);
-
   });
 
   it('rejects a stale save, accepts a matching token, and streams a snapshot over SSE', async () => {

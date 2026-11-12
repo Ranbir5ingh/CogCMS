@@ -21,7 +21,10 @@ describe('assertSameOrigin', () => {
   it('allows same-host and configured-origin JSON with optional charset', () => {
     expect(() =>
       assertSameOrigin(
-        request({ origin: 'http://internal:3003', 'content-type': 'application/json; charset=utf-8' }),
+        request({
+          origin: 'http://internal:3003',
+          'content-type': 'application/json; charset=utf-8',
+        }),
       ),
     ).not.toThrow();
     expect(() =>
@@ -34,7 +37,10 @@ describe('assertSameOrigin', () => {
   it('uses Referer only when Origin is absent', () => {
     expect(() =>
       assertSameOrigin(
-        request({ referer: 'https://cms.example.com/admin/dashboard', 'content-type': 'application/json' }),
+        request({
+          referer: 'https://cms.example.com/admin/dashboard',
+          'content-type': 'application/json',
+        }),
       ),
     ).not.toThrow();
   });
@@ -73,6 +79,22 @@ describe('assertSameOrigin', () => {
     expect(() => assertSameOrigin(multipart, 'json')).toThrowError(
       expect.objectContaining({ status: 400 }),
     );
+  });
+
+  it('accepts JSON or text/plain when jsonOrText is selected', () => {
+    const headers = { origin: 'https://cms.example.com' };
+    expect(() =>
+      assertSameOrigin(request({ ...headers, 'content-type': 'text/plain' }), 'jsonOrText'),
+    ).not.toThrow();
+    expect(() =>
+      assertSameOrigin(request({ ...headers, 'content-type': 'application/json' }), 'jsonOrText'),
+    ).not.toThrow();
+    expect(() =>
+      assertSameOrigin(
+        request({ ...headers, 'content-type': 'multipart/form-data; boundary=abc' }),
+        'jsonOrText',
+      ),
+    ).toThrowError(expect.objectContaining({ status: 400 }));
   });
 
   it('does not impose mutation headers on GET', () => {

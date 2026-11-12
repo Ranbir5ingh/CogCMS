@@ -224,22 +224,38 @@ export function useCollaboration({
       }, HEARTBEAT_INTERVAL_MS);
     })();
 
+    const release = () => {
+      const body = JSON.stringify({ ...resource, action: 'release' });
+      try {
+        if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+          const sent = navigator.sendBeacon(
+            '/api/admin/collaboration/locks',
+            new Blob([body], { type: 'text/plain' }),
+          );
+          if (sent) return;
+        }
+      } catch {
+        /* fall through to fetch */
+      }
+      void fetch('/api/admin/collaboration/locks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        keepalive: true,
+      }).catch(() => {
+        /* tab is closing */
+      });
+    };
+
+    window.addEventListener('pagehide', release);
+
     return () => {
       cancelled = true;
       source?.close();
       if (pollTimer !== null) window.clearInterval(pollTimer);
       if (beatTimer !== null) window.clearInterval(beatTimer);
-      const held =
-        lockRef.current && viewerRef.current && lockRef.current.userId === viewerRef.current;
-      void fetch('/api/admin/collaboration/locks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...resource, action: 'release' }),
-        keepalive: true,
-      }).catch(() => {
-        /* tab is closing */
-      });
-      void held;
+      window.removeEventListener('pagehide', release);
+      release();
     };
   }, [applySnapshot, resourceId, resourceType]);
 
