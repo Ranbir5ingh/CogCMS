@@ -2,7 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TOAST_MESSAGES } from '@/components/admin/toast-messages';
-import { HEARTBEAT_INTERVAL_MS, SSE_POLL_MS, type CollabResourceType, type CommentField } from '@/lib/collaboration/types';
+import {
+  HEARTBEAT_INTERVAL_MS,
+  SSE_POLL_MS,
+  type CollabResourceType,
+  type CommentField,
+} from '@/lib/collaboration/types';
 
 export type CollabLock = {
   resourceType: CollabResourceType;
@@ -199,7 +204,9 @@ export function useCollaboration({
         await fetchSnapshot();
         return;
       }
-      setError(typeof payload.error === 'string' ? payload.error : 'Could not acquire the edit lock.');
+      setError(
+        typeof payload.error === 'string' ? payload.error : 'Could not acquire the edit lock.',
+      );
       await fetchSnapshot();
     };
 
@@ -222,7 +229,8 @@ export function useCollaboration({
       source?.close();
       if (pollTimer !== null) window.clearInterval(pollTimer);
       if (beatTimer !== null) window.clearInterval(beatTimer);
-      const held = lockRef.current && viewerRef.current && lockRef.current.userId === viewerRef.current;
+      const held =
+        lockRef.current && viewerRef.current && lockRef.current.userId === viewerRef.current;
       void fetch('/api/admin/collaboration/locks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -262,36 +270,51 @@ export function useCollaboration({
       const payload = await readJson(res);
       if (!res.ok) {
         throw new Error(
-          typeof payload.error === 'string' ? payload.error : TOAST_MESSAGES.collaboration.commentFailed,
+          typeof payload.error === 'string'
+            ? payload.error
+            : TOAST_MESSAGES.collaboration.commentFailed,
         );
       }
       const comment = payload as unknown as CollabComment;
-      setComments((current) => (current.some((row) => row.id === comment.id) ? current : [...current, comment]));
+      setComments((current) =>
+        current.some((row) => row.id === comment.id) ? current : [...current, comment],
+      );
       return comment;
     },
     [resourceId, resourceType],
   );
 
-  const patchComment = useCallback(async (id: string, patch: { body?: string; resolved?: boolean }) => {
+  const patchComment = useCallback(
+    async (id: string, patch: { body?: string; resolved?: boolean }) => {
+      const res = await fetch(`/api/admin/collaboration/comments/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      const payload = await readJson(res);
+      if (!res.ok) {
+        throw new Error(
+          typeof payload.error === 'string' ? payload.error : 'Could not update the comment.',
+        );
+      }
+      const comment = payload as unknown as CollabComment;
+      setComments((current) => current.map((row) => (row.id === comment.id ? comment : row)));
+      return comment;
+    },
+    [],
+  );
+
+  const removeComment = useCallback(async (id: string) => {
     const res = await fetch(`/api/admin/collaboration/comments/${id}`, {
-      method: 'PATCH',
+      method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(patch),
+      body: '{}',
     });
     const payload = await readJson(res);
     if (!res.ok) {
-      throw new Error(typeof payload.error === 'string' ? payload.error : 'Could not update the comment.');
-    }
-    const comment = payload as unknown as CollabComment;
-    setComments((current) => current.map((row) => (row.id === comment.id ? comment : row)));
-    return comment;
-  }, []);
-
-  const removeComment = useCallback(async (id: string) => {
-    const res = await fetch(`/api/admin/collaboration/comments/${id}`, { method: 'DELETE' });
-    const payload = await readJson(res);
-    if (!res.ok) {
-      throw new Error(typeof payload.error === 'string' ? payload.error : 'Could not delete the comment.');
+      throw new Error(
+        typeof payload.error === 'string' ? payload.error : 'Could not delete the comment.',
+      );
     }
     setComments((current) => current.filter((row) => row.id !== id));
   }, []);
