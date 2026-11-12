@@ -802,28 +802,30 @@ function Field({
   }`;
 
   return (
-    <label className="grid gap-1.5 text-xs font-semibold uppercase tracking-wider text-stone-500">
-      {label}
-      {multiline ? (
-        <textarea
-          name={name}
-          value={value}
-          onChange={onChange}
-          placeholder={placeholder}
-          maxLength={maxLength}
-          className={`${inputClass} min-h-[88px]`}
-        />
-      ) : (
-        <input
-          type={type}
-          name={name}
-          value={value}
-          onChange={onChange}
-          placeholder={placeholder}
-          maxLength={maxLength}
-          className={inputClass}
-        />
-      )}
+    <div className="grid gap-1.5">
+      <label className="grid gap-1.5 text-xs font-semibold uppercase tracking-wider text-stone-500">
+        {label}
+        {multiline ? (
+          <textarea
+            name={name}
+            value={value}
+            onChange={onChange}
+            placeholder={placeholder}
+            maxLength={maxLength}
+            className={`${inputClass} min-h-[88px]`}
+          />
+        ) : (
+          <input
+            type={type}
+            name={name}
+            value={value}
+            onChange={onChange}
+            placeholder={placeholder}
+            maxLength={maxLength}
+            className={inputClass}
+          />
+        )}
+      </label>
       {(hint || maxLength) && (
         <span className="flex justify-between gap-2 text-[11px] font-normal normal-case tracking-normal text-stone-400">
           <span>{hint}</span>
@@ -834,7 +836,7 @@ function Field({
           )}
         </span>
       )}
-    </label>
+    </div>
   );
 }
 
