@@ -8,7 +8,7 @@ The CMS includes site-scoped users and API keys, editorial previews, stored blog
 
 This public repository, [Ranbir5ingh/CogCMS](https://github.com/Ranbir5ingh/CogCMS), extends CogCMS with two complete, site-scoped features for a take-home assignment:
 
-- **Media Library** — validated image uploads, generated size variants, alt text, a library UI, and a reusable picker in the blog, event and author editors.
+- **Media Library** — validated image uploads, generated size variants, alt text, a library UI, and a reusable picker in the blog, event, whitepaper and author editors.
 - **Live Collaboration** — SSE presence, lease-based edit locks with heartbeat and takeover, a stale-save guard, and document comments with live updates.
 
 Both features are described in full below (overview, architecture, design decisions, technology choices, setup, and limitations). The original CogCMS product documentation is preserved in this file and in `docs/`. The optional in-repo [ASSIGNMENT.md](ASSIGNMENT.md) is a different, pre-existing pagination exercise and is not the scope of this work.
@@ -42,6 +42,15 @@ A hosted replica set such as a MongoDB Atlas cluster also runs the app, but `see
 
 Run `npm run typecheck`, `npm test`, and `npm run build` sequentially. Unit and integration tests use a separate temporary MongoDB replica set. If its binary is not cached, `mongodb-memory-server` may download one. Report any setup or baseline failure separately from your changes.
 
+Optional Playwright coverage (not a CI gate, same as the rest of `e2e/`) drives the production build (`next build && next start`) against an in-memory replica set. After `npm run build`:
+
+```sh
+npx playwright test                         # the full e2e suite, including assignment verification
+npx playwright test e2e/assignment-verification.spec.ts
+```
+
+`e2e/assignment-verification.spec.ts` walks the assignment as a real user: login; Media Library uploads of JPEG, PNG, WebP, GIF and AVIF, rejected types and oversize files, variant headers, alt edit, search, pagination, in-use and unused delete; the picker on blog cover and inline image, event cover, author avatar and whitepaper cover, with save, reload and the public `/api/v1` page; two-admin collaboration (presence, lock vs read-only, heartbeat, takeover, stale-save rejection, comments add/resolve/delete live in the other tab, SSE fallback to polling, release on close, site isolation); plus console/hydration, keyboard focus in the picker, mobile width, and empty, loading and error states.
+
 ## Media Library
 
 ### Feature overview
@@ -68,7 +77,7 @@ flowchart LR
   subgraph Editors
     Library["Media Library page"]
     Picker["MediaPicker dialog"]
-    Forms["Blog, event and author forms"]
+    Forms["Blog, event, whitepaper and author forms"]
   end
   subgraph AdminAPI["Admin API — cookie auth, CSRF, site scope"]
     POST["POST /api/admin/media"]
@@ -153,7 +162,7 @@ To use S3 instead of disk, set the three `S3_*` variables. To relocate local fil
 When two editors open the same existing blog, event or whitepaper, they can see who else is viewing or editing, they cannot silently overwrite each other, and they can leave comments that update live.
 
 - **Presence** is a heartbeat: opening the document records you, and a 30-second TTL drops you after you leave.
-- **Edit locks** are a 45-second lease renewed every 15 seconds while the holder's tab is open. Acquire is atomic. A second editor is told who holds the lock and can **take over** after a confirmation dialog. The form is read-only until they hold the lock. Releasing happens on leave (`keepalive` on unmount) or when the lease expires.
+- **Edit locks** are a 45-second lease renewed every 15 seconds while the holder's tab is open. Acquire is atomic. A second editor is told who holds the lock and can **take over** after a confirmation dialog. The form is read-only until they hold the lock. Releasing happens on leave (`sendBeacon` on `pagehide`, with a `keepalive` fetch as fallback) or when the lease expires.
 - **Stale-save guard:** existing-document PUTs accept an optional `expectedUpdatedAt`. If it does not match the document, the write returns 409. A write is also rejected if someone else holds a live lock. Older clients that omit the token still save when no foreign lock is held, so existing tests and tools keep working.
 - **Comments** are plain text (1–2000 characters) with an optional field anchor (`title`, `excerpt`, `content`, `image`, `meta`). Any authorised editor on the site can resolve or reopen; only the author or an admin can delete. Empty bodies are rejected.
 - **Transport:** the browser opens an EventSource to `/api/admin/collaboration/stream`. The server polls Mongo every two seconds and pushes a snapshot when it changes. If SSE fails, the hook falls back to the same snapshot over HTTP polling, and the chrome shows a "Polling" hint. There is no paid realtime service and no Mongo change stream.
@@ -219,7 +228,7 @@ All routes sit under `/api/admin/collaboration/*`, are cookie-authenticated, sit
 | **TTL indexes (`expireAfterSeconds: 0`)**        | Same pattern as `LoginAttempt`; queries still filter on `expiresAt`.                                         |
 | **`expectedUpdatedAt` as an optional ISO field** | Stripped from Zod content schemas; compared with `Date#getTime` against `updatedAt`.                         |
 | **`ConfirmDialog`**                              | Existing Radix alert dialog for takeover, so the wording is the only new decision.                           |
-| **`keepalive` fetch on unmount**                 | Releases the lease when the tab closes, without a new protocol.                                              |
+| **`sendBeacon` on `pagehide`**                    | Releases the lease when the tab closes (`text/plain` body, CSRF-safe). A `keepalive` fetch is the fallback.  |
 
 ### Setup and usage
 
@@ -230,7 +239,7 @@ No extra process beyond the [local replica set](#local-setup) (including `npm ru
 3. Avatars in the editor header show who is viewing (green) or holding the lock (orange). The holder sees a green "You are editing" bar; everyone else sees an amber bar with **Take over editing**.
 4. While you do not hold the lock, the form is inert, save is disabled, and a save that slipped through would 409.
 5. Open **Comments** to leave a note, optionally attach it to a field, resolve or delete. New comments appear for other open editors within about two seconds (or on the next poll).
-6. Heartbeat is automatic. Close the tab and the lease expires within 45 seconds if the release request did not already run.
+6. Heartbeat is automatic. Close the tab and the lease is released immediately (`sendBeacon`); if that request is lost, the lease expires within 45 seconds.
 
 To exercise two users locally: `npm run seed:admin`, create a second user under **Users**, and sign in from a private window.
 
