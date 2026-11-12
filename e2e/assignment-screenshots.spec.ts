@@ -80,7 +80,7 @@ test.describe('assignment screenshots', () => {
 
     // Comments as the holder
     await admin.getByRole('button', { name: 'Comments' }).click();
-    await expect(admin.getByRole('complementary', { name: 'Comments' })).toBeVisible();
+    await expect(admin.getByRole('dialog', { name: 'Comments' })).toBeVisible();
     await admin.getByPlaceholder(/Leave a comment/i).fill('Let’s lead with the quay photograph.');
     await admin.getByRole('button', { name: 'Post comment' }).click();
     await expect(admin.getByText('Let’s lead with the quay photograph.')).toBeVisible();

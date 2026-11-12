@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
+import { useFocusTrap } from '@/lib/admin/use-focus-trap';
 import { useSite } from '@/components/admin/site-provider';
 import { ConfirmDialog } from '@/components/admin/confirm-dialog';
 import { useToast } from '@/components/admin/toast-provider';
@@ -23,6 +24,7 @@ function formatBytes(bytes: number): string {
 export default function MediaLibraryPage() {
   const site = useSite();
   const { showToast } = useToast();
+  const altDialogRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState('');
   const [appliedSearch, setAppliedSearch] = useState('');
@@ -146,6 +148,17 @@ export default function MediaLibraryPage() {
       setDeletePending(false);
     }
   }
+
+  useFocusTrap(Boolean(editing), altDialogRef);
+
+  useEffect(() => {
+    if (!editing) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') setEditing(null);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [editing]);
 
   const items = list?.data ?? [];
   const meta = list?.meta;
@@ -338,9 +351,11 @@ export default function MediaLibraryPage() {
             onClick={() => setEditing(null)}
           />
           <div
+            ref={altDialogRef}
             role="dialog"
             aria-modal="true"
             aria-labelledby="edit-alt-title"
+            tabIndex={-1}
             className="relative w-full max-w-lg rounded-3xl border border-stone-200 bg-white p-6 shadow-2xl"
           >
             <h2 id="edit-alt-title" className="text-lg font-semibold text-stone-950">

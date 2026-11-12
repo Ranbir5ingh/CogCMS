@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useId, useRef, useState, type DragEvent } from 'react';
+import { useFocusTrap } from '@/lib/admin/use-focus-trap';
 import type { MediaSizeName } from '@/models/Media';
 import type { SerializedMedia } from '@/lib/media/serialize';
 import {
@@ -55,6 +56,7 @@ export function MediaPicker({
   const { showToast } = useToast();
   const titleId = useId();
   const fileRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const [search, setSearch] = useState('');
   const [appliedSearch, setAppliedSearch] = useState('');
   const [page, setPage] = useState(1);
@@ -117,6 +119,7 @@ export function MediaPicker({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onOpenChange]);
+  useFocusTrap(open, dialogRef);
 
   function select(item: SerializedMedia) {
     setSelected(item);
@@ -217,6 +220,8 @@ export function MediaPicker({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        ref={dialogRef}
+        tabIndex={-1}
         className="relative z-[81] flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-t-3xl border border-stone-200 bg-white shadow-2xl sm:rounded-3xl"
       >
         <header className="flex flex-wrap items-start justify-between gap-3 border-b border-stone-200 px-5 py-4 sm:px-6">

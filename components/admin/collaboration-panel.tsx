@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useFocusTrap } from '@/lib/admin/use-focus-trap';
 import { ConfirmDialog } from '@/components/admin/confirm-dialog';
 import { TOAST_MESSAGES } from '@/components/admin/toast-messages';
 import { useToast } from '@/components/admin/toast-provider';
@@ -91,7 +92,10 @@ export function CollaborationPresence({
         </div>
       )}
       {collab.transport === 'poll' && (
-        <span className="hidden text-[10px] font-medium text-stone-400 sm:inline" title="Live updates are using polling">
+        <span
+          className="hidden text-[10px] font-medium text-stone-400 sm:inline"
+          title="Live updates are using polling"
+        >
           Polling
         </span>
       )}
@@ -138,15 +142,16 @@ export function CollaborationBanner({ collab }: { collab: CollaborationApi }) {
     );
   }
 
-  if (!collab.lock || collab.canEdit) return (
-    <>
-      {collab.error && (
-        <p className="border-b border-amber-100 bg-amber-50 px-6 py-2 text-xs font-medium text-amber-800">
-          {collab.error}
-        </p>
-      )}
-    </>
-  );
+  if (!collab.lock || collab.canEdit)
+    return (
+      <>
+        {collab.error && (
+          <p className="border-b border-amber-100 bg-amber-50 px-6 py-2 text-xs font-medium text-amber-800">
+            {collab.error}
+          </p>
+        )}
+      </>
+    );
 
   return (
     <>
@@ -215,6 +220,7 @@ export function CommentsSidebar({
   const [showResolved, setShowResolved] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
   const visible = useMemo(() => {
     const rows = showResolved ? collab.comments : collab.comments.filter((row) => !row.resolvedAt);
     return rows;
@@ -225,6 +231,8 @@ export function CommentsSidebar({
     const node = listRef.current;
     if (node) node.scrollTop = node.scrollHeight;
   }, [open, visible.length]);
+
+  useFocusTrap(open && collab.enabled, panelRef);
 
   useEffect(() => {
     if (!open) return;
@@ -247,7 +255,10 @@ export function CommentsSidebar({
       setBody('');
       showToast('success', TOAST_MESSAGES.collaboration.commentAdded);
     } catch (error) {
-      showToast('error', error instanceof Error ? error.message : TOAST_MESSAGES.collaboration.commentFailed);
+      showToast(
+        'error',
+        error instanceof Error ? error.message : TOAST_MESSAGES.collaboration.commentFailed,
+      );
     } finally {
       setSubmitting(false);
     }
@@ -255,8 +266,11 @@ export function CommentsSidebar({
 
   return (
     <aside
+      ref={panelRef}
+      tabIndex={-1}
       className="fixed inset-y-0 right-0 z-[60] flex w-full max-w-md flex-col border-l border-stone-200 bg-white shadow-2xl"
-      role="complementary"
+      role="dialog"
+      aria-modal="true"
       aria-label="Comments"
     >
       <div className="flex items-center justify-between border-b border-stone-200 px-5 py-4">
@@ -299,7 +313,9 @@ export function CommentsSidebar({
             <article
               key={comment.id}
               className={`rounded-2xl border p-3 ${
-                comment.resolvedAt ? 'border-stone-100 bg-stone-50 opacity-80' : 'border-stone-200 bg-white'
+                comment.resolvedAt
+                  ? 'border-stone-100 bg-stone-50 opacity-80'
+                  : 'border-stone-200 bg-white'
               }`}
             >
               <header className="flex items-start justify-between gap-2">
@@ -319,9 +335,16 @@ export function CommentsSidebar({
                     type="button"
                     className="rounded-md px-2 py-1 text-[11px] font-semibold text-stone-600 hover:bg-stone-100"
                     onClick={() => {
-                      void collab.patchComment(comment.id, { resolved: !comment.resolvedAt }).catch((error) => {
-                        showToast('error', error instanceof Error ? error.message : 'Could not update the comment.');
-                      });
+                      void collab
+                        .patchComment(comment.id, { resolved: !comment.resolvedAt })
+                        .catch((error) => {
+                          showToast(
+                            'error',
+                            error instanceof Error
+                              ? error.message
+                              : 'Could not update the comment.',
+                          );
+                        });
                     }}
                   >
                     {comment.resolvedAt ? 'Reopen' : 'Resolve'}
