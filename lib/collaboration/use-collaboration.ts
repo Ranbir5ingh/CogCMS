@@ -57,6 +57,19 @@ export function collaborationConflictMessage(body: {
   return body.error || TOAST_MESSAGES.collaboration.lockHeld;
 }
 
+/** Whether a waiting editor should try to take a just-freed (or expired) lease. */
+export function shouldAcquireFreedLock(input: {
+  lock: { expiresAt?: string } | null | undefined;
+  visible: boolean;
+  alreadyAcquiring: boolean;
+  enabled: boolean;
+}): boolean {
+  if (!input.enabled || !input.visible || input.alreadyAcquiring) return false;
+  if (!input.lock) return true;
+  const expires = Date.parse(input.lock.expiresAt ?? '');
+  return Number.isFinite(expires) && expires <= Date.now();
+}
+
 async function readJson(res: Response): Promise<Record<string, unknown>> {
   try {
     return (await res.json()) as Record<string, unknown>;
@@ -134,6 +147,7 @@ export function useCollaboration({
     let pollTimer: number | null = null;
     let beatTimer: number | null = null;
     let esFailures = 0;
+    let claiming = false;
     const resource = { resourceType, resourceId };
 
     const post = async (path: string, body: unknown) => {
@@ -149,7 +163,10 @@ export function useCollaboration({
     const fetchSnapshot = async () => {
       const res = await fetch(snapshotUrl(resourceType, resourceId), { cache: 'no-store' });
       const payload = (await readJson(res)) as unknown as CollabSnapshot;
-      if (!cancelled && res.ok) applySnapshot(payload);
+      if (!cancelled && res.ok) {
+        applySnapshot(payload);
+        maybeClaimFreedLock(payload);
+      }
       return payload;
     };
 
@@ -172,7 +189,9 @@ export function useCollaboration({
         if (cancelled) return;
         setTransport('sse');
         try {
-          applySnapshot(JSON.parse((event as MessageEvent).data) as CollabSnapshot);
+          const snapshot = JSON.parse((event as MessageEvent).data) as CollabSnapshot;
+          applySnapshot(snapshot);
+          maybeClaimFreedLock(snapshot);
         } catch {
           /* ignore a malformed frame */
         }
@@ -188,26 +207,47 @@ export function useCollaboration({
     };
 
     const acquire = async () => {
-      const { res, payload } = await post('/locks', { ...resource, action: 'acquire' });
-      if (cancelled) return;
-      if (res.ok) {
-        applySnapshot(payload as unknown as CollabSnapshot);
-        setError(null);
-        return;
-      }
-      if (res.status === 409) {
-        const details = payload.details as { lock?: CollabLock } | undefined;
-        if (details?.lock) {
-          setLock(details.lock);
-          lockRef.current = details.lock;
+      if (claiming) return;
+      claiming = true;
+      try {
+        const { res, payload } = await post('/locks', { ...resource, action: 'acquire' });
+        if (cancelled) return;
+        if (res.ok) {
+          applySnapshot(payload as unknown as CollabSnapshot);
+          setError(null);
+          return;
         }
+        if (res.status === 409) {
+          const details = payload.details as { lock?: CollabLock } | undefined;
+          if (details?.lock) {
+            setLock(details.lock);
+            lockRef.current = details.lock;
+          }
+          await fetchSnapshot();
+          return;
+        }
+        setError(
+          typeof payload.error === 'string' ? payload.error : 'Could not acquire the edit lock.',
+        );
         await fetchSnapshot();
+      } finally {
+        claiming = false;
+      }
+    };
+
+    const maybeClaimFreedLock = (snapshot: Partial<CollabSnapshot> | null | undefined) => {
+      if (!snapshot || !('lock' in snapshot)) return;
+      if (
+        !shouldAcquireFreedLock({
+          lock: snapshot.lock ?? null,
+          visible: typeof document !== 'undefined' && document.visibilityState === 'visible',
+          alreadyAcquiring: claiming,
+          enabled: !cancelled,
+        })
+      ) {
         return;
       }
-      setError(
-        typeof payload.error === 'string' ? payload.error : 'Could not acquire the edit lock.',
-      );
-      await fetchSnapshot();
+      void acquire();
     };
 
     const beat = async () => {
@@ -249,12 +289,19 @@ export function useCollaboration({
 
     window.addEventListener('pagehide', release);
 
+    const onVisibility = () => {
+      if (typeof document === 'undefined' || document.visibilityState !== 'visible') return;
+      maybeClaimFreedLock({ lock: lockRef.current });
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
     return () => {
       cancelled = true;
       source?.close();
       if (pollTimer !== null) window.clearInterval(pollTimer);
       if (beatTimer !== null) window.clearInterval(beatTimer);
       window.removeEventListener('pagehide', release);
+      document.removeEventListener('visibilitychange', onVisibility);
       release();
     };
   }, [applySnapshot, resourceId, resourceType]);

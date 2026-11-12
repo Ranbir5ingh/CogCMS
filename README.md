@@ -49,7 +49,7 @@ npx playwright test                         # the full e2e suite, including assi
 npx playwright test e2e/assignment-verification.spec.ts
 ```
 
-`e2e/assignment-verification.spec.ts` walks the assignment as a real user: login; Media Library uploads of JPEG, PNG, WebP, GIF and AVIF, rejected types and oversize files, variant headers, alt edit, search, pagination, in-use and unused delete; the picker on blog cover and inline image, event cover, author avatar and whitepaper cover, with save, reload and the public `/api/v1` page; two-admin collaboration (presence, lock vs read-only, heartbeat, takeover, stale-save rejection, comments add/resolve/delete live in the other tab, SSE fallback to polling, release on close, site isolation); plus console/hydration, keyboard focus in the picker, mobile width, and empty, loading and error states.
+`e2e/assignment-verification.spec.ts` walks the assignment as a real user: login; Media Library uploads of JPEG, PNG, WebP, GIF and AVIF, rejected types and oversize files, variant headers, alt edit, search, pagination, in-use and unused delete; the picker on blog cover and inline image, event cover, author avatar and whitepaper cover, with save, reload and the public `/api/v1` page; two-admin collaboration (presence, lock vs read-only, heartbeat, takeover, stale-save rejection, comments add/resolve/delete live in the other tab, SSE fallback to polling, release on close with auto-acquire of the freed lease, site isolation); plus console/hydration, keyboard focus in the picker, mobile width, and empty, loading and error states.
 
 ## Media Library
 
@@ -162,7 +162,7 @@ To use S3 instead of disk, set the three `S3_*` variables. To relocate local fil
 When two editors open the same existing blog, event or whitepaper, they can see who else is viewing or editing, they cannot silently overwrite each other, and they can leave comments that update live.
 
 - **Presence** is a heartbeat: opening the document records you, and a 30-second TTL drops you after you leave.
-- **Edit locks** are a 45-second lease renewed every 15 seconds while the holder's tab is open. Acquire is atomic. A second editor is told who holds the lock and can **take over** after a confirmation dialog. The form is read-only until they hold the lock. Releasing happens on leave (`sendBeacon` on `pagehide`, with a `keepalive` fetch as fallback) or when the lease expires.
+- **Edit locks** are a 45-second lease renewed every 15 seconds while the holder's tab is open. Acquire is atomic. A second editor is told who holds the lock and can **take over** after a confirmation dialog. The form is read-only until they hold the lock. Releasing happens on leave (`sendBeacon` on `pagehide`, with a `keepalive` fetch as fallback) or when the lease expires. A co-editor who still has the document open in a **visible** tab then acquires the freed lease automatically (the atomic acquire settles a race) and sees "You are editing" without reopening; a hidden background tab waits until it becomes visible.
 - **Stale-save guard:** existing-document PUTs accept an optional `expectedUpdatedAt`. If it does not match the document, the write returns 409. A write is also rejected if someone else holds a live lock. Older clients that omit the token still save when no foreign lock is held, so existing tests and tools keep working.
 - **Comments** are plain text (1–2000 characters) with an optional field anchor (`title`, `excerpt`, `content`, `image`, `meta`). Any authorised editor on the site can resolve or reopen; only the author or an admin can delete. Empty bodies are rejected.
 - **Transport:** the browser opens an EventSource to `/api/admin/collaboration/stream`. The server polls Mongo every two seconds and pushes a snapshot when it changes. If SSE fails, the hook falls back to the same snapshot over HTTP polling, and the chrome shows a "Polling" hint. There is no paid realtime service and no Mongo change stream.
@@ -239,7 +239,7 @@ No extra process beyond the [local replica set](#local-setup) (including `npm ru
 3. Avatars in the editor header show who is viewing (green) or holding the lock (orange). The holder sees a green "You are editing" bar; everyone else sees an amber bar with **Take over editing**.
 4. While you do not hold the lock, the form is inert, save is disabled, and a save that slipped through would 409.
 5. Open **Comments** to leave a note, optionally attach it to a field, resolve or delete. New comments appear for other open editors within about two seconds (or on the next poll).
-6. Heartbeat is automatic. Close the tab and the lease is released immediately (`sendBeacon`); if that request is lost, the lease expires within 45 seconds.
+6. Heartbeat is automatic. Close the tab and the lease is released immediately (`sendBeacon`); if that request is lost, the lease expires within 45 seconds. A co-editor who still has the document open and visible acquires the lease and sees "You are editing" without reopening.
 
 To exercise two users locally: `npm run seed:admin`, create a second user under **Users**, and sign in from a private window.
 
@@ -252,6 +252,7 @@ To exercise two users locally: `npm run seed:admin`, create a second user under 
 - New unsaved drafts are intentionally unlocked until the first save. After that save the editor stays on the document (the URL gains `?slug=…`) and collaboration starts immediately.
 - Takeover does not force the previous holder's tab to discard its buffer; it makes their next save 409 (stale or lock). That is safer than wiping their work, but they need to copy unsaved text out themselves.
 - The polling fallback is slightly more chatty. A future WebSocket path could land behind the same snapshot schema without changing the UI hook.
+- A waiting editor auto-acquires a freed or expired lease from the live snapshot, but only while that tab is visible (`document.visibilityState`). A hidden background tab does not claim the lock until the editor looks at it again, so forgotten tabs do not compete while the user is elsewhere.
 
 ## Boundaries
 

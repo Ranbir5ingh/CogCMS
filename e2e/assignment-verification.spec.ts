@@ -579,7 +579,10 @@ test.describe('assignment end-to-end verification', () => {
     // Release on close: navigating away unmounts the editor and must free the lock
     // so A can save. (Closing the Playwright context is too abrupt for keepalive.)
     await b.goto('about:blank');
+    // A is a visible waiting editor: it should take the freed lease itself and
+    // show "You are editing" without reopening the document.
     await expect(a.getByRole('button', { name: 'Save draft' })).toBeEnabled({ timeout: 15_000 });
+    await expect(a.getByText(/You are editing this document/i)).toBeVisible();
     await expect(a.getByRole('button', { name: 'Take over editing' })).toHaveCount(0);
     await bCtx.close();
 
