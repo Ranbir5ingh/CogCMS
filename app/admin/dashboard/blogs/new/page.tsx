@@ -27,6 +27,8 @@ import { useLeaveGuard } from '@/lib/admin/use-leave-guard';
 import { useEditorBaseline } from '@/lib/admin/use-editor-baseline';
 import { uploadImageDirect } from '@/lib/media/upload-client';
 import { MediaPicker, type MediaPick } from '@/components/admin/media-picker';
+import { useCollaboration, collaborationConflictMessage } from '@/lib/collaboration/use-collaboration';
+import { useCollaborationUi } from '@/components/admin/collaboration-panel';
 import {
   CLIENT_UPLOAD_OUTPUT_TYPE,
   CLIENT_UPLOAD_TARGET_BYTES,
@@ -515,6 +517,8 @@ function EditorForm() {
   const quillRef = useRef<any>(null);
   const [promptRequest, setPromptRequest] = useState<PromptRequest | null>(null);
   const savedRange = useRef<number | null>(null);
+  const [documentId, setDocumentId] = useState<string | null>(null);
+  const [savedUpdatedAt, setSavedUpdatedAt] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     title: '',
@@ -579,6 +583,8 @@ function EditorForm() {
           setFormData(hydrated);
           setContent(data.content || '');
           setLastPublishedAt(data.status === 'publish' ? data.updatedAt || null : null);
+          setDocumentId(typeof data._id === 'string' ? data._id : data._id ? String(data._id) : null);
+          setSavedUpdatedAt(typeof data.updatedAt === 'string' ? data.updatedAt : null);
           setSlugManuallyEdited(true);
           initialSnapshotRef.current = JSON.stringify({
             ...hydrated,
@@ -624,6 +630,8 @@ function EditorForm() {
     },
   });
   const leaveGuard = useLeaveGuard(isDirty, clearFormState);
+  const collab = useCollaboration({ resourceType: 'blog', resourceId: documentId });
+  const collabUi = useCollaborationUi(collab);
 
   // ── Auto-resize textareas ─────────────────────
   useEffect(() => {
@@ -1002,6 +1010,7 @@ function EditorForm() {
           keyTakeaways: cleanTakeaways,
           relatedSlugs: formData.relatedSlugs,
           tocOverrides: formData.tocOverrides,
+          ...(isEdit && savedUpdatedAt ? { expectedUpdatedAt: savedUpdatedAt } : {}),
         }),
       });
 
@@ -1009,7 +1018,8 @@ function EditorForm() {
       if (!res.ok) {
         showToast(
           'error',
-          data.details?.fieldErrors?.authorId?.[0] ||
+          collaborationConflictMessage(data) ||
+            data.details?.fieldErrors?.authorId?.[0] ||
             data.error ||
             TOAST_MESSAGES.blogEditor.saveFailed,
         );
@@ -1117,6 +1127,7 @@ function EditorForm() {
 
   return (
     <div className="min-h-screen text-[#1a1a1a]">
+      {collabUi.sidebar}
       {/* Hidden file inputs — kept as a fallback; the library picker is the primary path. */}
       <input
         type="file"
@@ -1223,10 +1234,12 @@ function EditorForm() {
             </svg>
           </button>
 
+          {collabUi.presence}
           <button
             type="button"
             onClick={() => handleSubmit('draft')}
-            disabled={loading}
+            disabled={loading || !collab.canEdit}
+            title={!collab.canEdit ? 'Someone else is editing this document' : undefined}
             className="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-stone-700 disabled:opacity-50"
           >
             Save draft
@@ -1235,7 +1248,8 @@ function EditorForm() {
             <button
               type="button"
               onClick={() => handleSubmit('publish')}
-              disabled={loading}
+              disabled={loading || !collab.canEdit}
+              title={!collab.canEdit ? 'Someone else is editing this document' : undefined}
               className="rounded-xl bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-orange-700 disabled:opacity-50"
             >
               {loading ? 'Publishing...' : 'Publish'}
@@ -1257,8 +1271,9 @@ function EditorForm() {
         </div>
       </div>
 
+      {collabUi.banner}
       {/* ── Main editor canvas ─────────────────── */}
-      <main className="max-w-[860px] mx-auto px-6 pt-10 pb-32">
+      <main className="max-w-[860px] mx-auto px-6 pt-10 pb-32" {...(!collab.canEdit ? { inert: true } : {})}>
         <div className="rounded-2xl border border-stone-200 bg-white p-8 shadow-sm">
           {/* ── Cover image with drag & drop ─────── */}
           <div className="mb-10 group">
@@ -1580,6 +1595,7 @@ function EditorForm() {
                 useSemanticHTML={false}
                 {...({ ref: quillRef } as any)}
                 theme="bubble"
+                readOnly={!collab.canEdit}
                 value={content}
                 onChange={(value: string, _delta: unknown, source: string) => {
                   setContent(value);

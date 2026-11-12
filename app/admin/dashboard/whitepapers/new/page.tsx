@@ -14,6 +14,8 @@ import { ConfirmDialog } from '@/components/admin/confirm-dialog';
 import { makeFormStateKey, useSessionFormState } from '@/lib/admin/session-form-state';
 import { useLeaveGuard } from '@/lib/admin/use-leave-guard';
 import { useEditorBaseline } from '@/lib/admin/use-editor-baseline';
+import { useCollaboration, collaborationConflictMessage } from '@/lib/collaboration/use-collaboration';
+import { useCollaborationUi } from '@/components/admin/collaboration-panel';
 
 const ReactQuill = dynamic(() => import('react-quill-new'), { ssr: false });
 
@@ -139,6 +141,8 @@ function WhitepaperEditorForm() {
   const [loading, setLoading] = useState(false);
   const [invalidField, setInvalidField] = useState<keyof WhitepaperFormData | null>(null);
   const [loadingData, setLoadingData] = useState(!!editSlug);
+  const [documentId, setDocumentId] = useState<string | null>(null);
+  const [savedUpdatedAt, setSavedUpdatedAt] = useState<string | null>(null);
   const [savedSnapshot, setSavedSnapshot] = useState(() => JSON.stringify(DEFAULT_DATA));
   const isDirty = JSON.stringify(formData) !== savedSnapshot;
   const { showToast } = useToast();
@@ -188,6 +192,8 @@ function WhitepaperEditorForm() {
         };
         setFormData(loaded);
         setSavedSnapshot(JSON.stringify(loaded));
+        setDocumentId(typeof data._id === 'string' ? data._id : data._id ? String(data._id) : null);
+        setSavedUpdatedAt(typeof data.updatedAt === 'string' ? data.updatedAt : null);
 
         setSlugManuallyEdited(true);
       })
@@ -213,6 +219,8 @@ function WhitepaperEditorForm() {
     },
   });
   const leaveGuard = useLeaveGuard(isDirty, clearFormState);
+  const collab = useCollaboration({ resourceType: 'whitepaper', resourceId: documentId });
+  const collabUi = useCollaborationUi(collab);
 
   const computedReadTime = useMemo(() => estimateReadTime(formData.content), [formData.content]);
   const quillModules = useMemo(
@@ -364,12 +372,18 @@ function WhitepaperEditorForm() {
       const res = await fetch(endpoint, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          ...payload,
+          ...(isEdit && savedUpdatedAt ? { expectedUpdatedAt: savedUpdatedAt } : {}),
+        }),
       });
 
       const data = await res.json();
       if (!res.ok) {
-        showToast('error', data.error || TOAST_MESSAGES.whitepapers.saveFailed);
+        showToast(
+          'error',
+          collaborationConflictMessage(data) || data.error || TOAST_MESSAGES.whitepapers.saveFailed,
+        );
         return;
       }
 
@@ -404,11 +418,13 @@ function WhitepaperEditorForm() {
             {editSlug ? 'Edit whitepaper' : 'New whitepaper'}
           </h1>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {collabUi.presence}
           <button
             type="button"
             onClick={() => handleSubmit('draft')}
-            disabled={loading || loadingData}
+            disabled={loading || loadingData || !collab.canEdit}
+            title={!collab.canEdit ? 'Someone else is editing this document' : undefined}
             className="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-stone-700 disabled:opacity-50"
           >
             Save draft
@@ -416,18 +432,21 @@ function WhitepaperEditorForm() {
           <button
             type="button"
             onClick={() => handleSubmit('publish')}
-            disabled={loading || loadingData}
+            disabled={loading || loadingData || !collab.canEdit}
+            title={!collab.canEdit ? 'Someone else is editing this document' : undefined}
             className="rounded-xl bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-orange-700 disabled:opacity-50"
           >
             {loading ? 'Saving…' : 'Publish'}
           </button>
         </div>
       </div>
+      {collabUi.sidebar}
+      {collabUi.banner}
 
       {loadingData ? (
         <p className="py-12 text-sm text-stone-500">Loading whitepaper…</p>
       ) : (
-        <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_520px] lg:items-start">
+        <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_520px] lg:items-start" {...(!collab.canEdit ? { inert: true } : {})}>
           <div className="space-y-5 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
             <div className="grid gap-4 sm:grid-cols-2">
               <Field
@@ -590,6 +609,7 @@ function WhitepaperEditorForm() {
                 <ReactQuill
                   useSemanticHTML={false}
                   theme="snow"
+                  readOnly={!collab.canEdit}
                   value={formData.content}
                   onChange={(value: string, _delta: unknown, source: string) => {
                     setFormData((prev) => ({ ...prev, content: value }));

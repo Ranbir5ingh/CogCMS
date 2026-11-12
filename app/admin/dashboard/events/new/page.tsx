@@ -7,6 +7,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useSite } from '@/components/admin/site-provider';
 import { uploadImageDirect } from '@/lib/media/upload-client';
 import { MediaPicker } from '@/components/admin/media-picker';
+import { useCollaboration, collaborationConflictMessage } from '@/lib/collaboration/use-collaboration';
+import { useCollaborationUi } from '@/components/admin/collaboration-panel';
 import { ConfirmDialog } from '@/components/admin/confirm-dialog';
 import { useLeaveGuard } from '@/lib/admin/use-leave-guard';
 import {
@@ -402,6 +404,8 @@ function Editor() {
   const [dragging, setDragging] = useState(false);
   const [showImageUrl, setShowImageUrl] = useState(false);
   const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
+  const [documentId, setDocumentId] = useState<string | null>(null);
+  const [savedUpdatedAt, setSavedUpdatedAt] = useState<string | null>(null);
   const [openPicker, setOpenPicker] = useState<'start' | 'end' | null>(null);
   const [imageUrlInput, setImageUrlInput] = useState('');
   const fileInput = useRef<HTMLInputElement>(null);
@@ -458,6 +462,8 @@ function Editor() {
         };
         setForm(loaded);
         setSavedSnapshot(JSON.stringify(loaded));
+        setDocumentId(typeof data._id === 'string' ? data._id : data._id ? String(data._id) : null);
+        setSavedUpdatedAt(typeof data.updatedAt === 'string' ? data.updatedAt : null);
       })
       .catch((err) => {
         if (!controller.signal.aborted) {
@@ -511,6 +517,8 @@ function Editor() {
     };
   }, [storageKey, isDirty, form]);
   const leaveGuard = useLeaveGuard(isDirty, clearFormState);
+  const collab = useCollaboration({ resourceType: 'event', resourceId: documentId });
+  const collabUi = useCollaborationUi(collab);
   const modules = useMemo(
     () => ({
       toolbar: [
@@ -578,11 +586,16 @@ function Editor() {
         {
           method: editSlug ? 'PUT' : 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data),
+          body: JSON.stringify({
+            ...data,
+            ...(editSlug && savedUpdatedAt ? { expectedUpdatedAt: savedUpdatedAt } : {}),
+          }),
         },
       );
       const body = await res.json();
       if (!res.ok) {
+        const conflict = collaborationConflictMessage(body);
+        if (conflict) throw new Error(conflict);
         const fields = body.details?.fieldErrors;
         const first =
           fields &&
@@ -687,16 +700,19 @@ function Editor() {
           </h1>
           <p className="mt-2 text-sm text-stone-500">Share an experience with your audience.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {collabUi.presence}
           <button
-            disabled={busy || loading}
+            disabled={busy || loading || !collab.canEdit}
+            title={!collab.canEdit ? 'Someone else is editing this document' : undefined}
             onClick={() => save('draft')}
             className="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold disabled:opacity-50"
           >
             Save draft
           </button>
           <button
-            disabled={busy || loading}
+            disabled={busy || loading || !collab.canEdit}
+            title={!collab.canEdit ? 'Someone else is editing this document' : undefined}
             onClick={() => save('publish')}
             className="rounded-xl bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-orange-700 disabled:opacity-50"
           >
@@ -704,6 +720,8 @@ function Editor() {
           </button>
         </div>
       </div>
+      {collabUi.sidebar}
+      {collabUi.banner}
       {error && (
         <p role="alert" className="mt-5 rounded-xl bg-red-50 p-4 text-sm text-red-700">
           {error}
@@ -712,7 +730,7 @@ function Editor() {
       {loading ? (
         <p className="py-12 text-stone-500">Loading event…</p>
       ) : (
-        <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
+        <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start" {...(!collab.canEdit ? { inert: true } : {})}>
           <div className="min-w-0 space-y-5">
             <div className="space-y-4 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
               <h2 className="text-lg font-semibold">Event details</h2>
@@ -890,6 +908,7 @@ function Editor() {
                 >
                   <ReactQuill
                     theme="snow"
+                    readOnly={!collab.canEdit}
                     value={form.content}
                     onChange={(value) => set('content', value)}
                     modules={modules}
