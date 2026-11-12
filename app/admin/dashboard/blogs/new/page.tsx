@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback, useMemo, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import 'react-quill-new/dist/quill.bubble.css';
 import '../editor-table.css';
@@ -27,7 +27,10 @@ import { useLeaveGuard } from '@/lib/admin/use-leave-guard';
 import { useEditorBaseline } from '@/lib/admin/use-editor-baseline';
 import { uploadImageDirect } from '@/lib/media/upload-client';
 import { MediaPicker, type MediaPick } from '@/components/admin/media-picker';
-import { useCollaboration, collaborationConflictMessage } from '@/lib/collaboration/use-collaboration';
+import {
+  useCollaboration,
+  collaborationConflictMessage,
+} from '@/lib/collaboration/use-collaboration';
 import { useCollaborationUi } from '@/components/admin/collaboration-panel';
 import {
   CLIENT_UPLOAD_OUTPUT_TYPE,
@@ -484,7 +487,9 @@ const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 function EditorForm() {
   const site = useSite();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const editSlug = searchParams.get('slug');
+  const skipHydrateRef = useRef(false);
 
   const [loadingData, setLoadingData] = useState(!!editSlug);
   const [originalSlug, setOriginalSlug] = useState<string | null>(null);
@@ -549,6 +554,12 @@ function EditorForm() {
   // Fetch existing blog if editSlug
   useEffect(() => {
     if (!editSlug) return;
+    if (skipHydrateRef.current) {
+      skipHydrateRef.current = false;
+      setOriginalSlug(editSlug);
+      setLoadingData(false);
+      return;
+    }
     setOriginalSlug(editSlug);
     setLoadingData(true);
     fetch(`/api/admin/blogs/${editSlug}`, { cache: 'no-store' })
@@ -583,7 +594,9 @@ function EditorForm() {
           setFormData(hydrated);
           setContent(data.content || '');
           setLastPublishedAt(data.status === 'publish' ? data.updatedAt || null : null);
-          setDocumentId(typeof data._id === 'string' ? data._id : data._id ? String(data._id) : null);
+          setDocumentId(
+            typeof data._id === 'string' ? data._id : data._id ? String(data._id) : null,
+          );
           setSavedUpdatedAt(typeof data.updatedAt === 'string' ? data.updatedAt : null);
           setSlugManuallyEdited(true);
           initialSnapshotRef.current = JSON.stringify({
@@ -1026,7 +1039,6 @@ function EditorForm() {
         return;
       }
       initialSnapshotRef.current = JSON.stringify({ ...formData, content });
-      // The provider lives in the dashboard layout, so this survives the redirect.
       showToast(
         'success',
         action === 'publish'
@@ -1036,7 +1048,16 @@ function EditorForm() {
           : TOAST_MESSAGES.blogEditor.draftSaved,
       );
       clearFormState();
-      leaveGuard.leaveTo('/admin/dashboard/blogs');
+      const nextSlug = data.slug || formData.slug;
+      setOriginalSlug(nextSlug);
+      setDocumentId(typeof data._id === 'string' ? data._id : data._id ? String(data._id) : null);
+      setSavedUpdatedAt(typeof data.updatedAt === 'string' ? data.updatedAt : null);
+      if (!isEdit && nextSlug) {
+        skipHydrateRef.current = true;
+        router.replace(`/admin/dashboard/blogs/new?slug=${encodeURIComponent(nextSlug)}`, {
+          scroll: false,
+        });
+      }
     } catch (err: any) {
       showToast('error', err.message || TOAST_MESSAGES.blogEditor.saveFailed);
     } finally {
@@ -1273,7 +1294,10 @@ function EditorForm() {
 
       {collabUi.banner}
       {/* ── Main editor canvas ─────────────────── */}
-      <main className="max-w-[860px] mx-auto px-6 pt-10 pb-32" {...(!collab.canEdit ? { inert: true } : {})}>
+      <main
+        className="max-w-[860px] mx-auto px-6 pt-10 pb-32"
+        {...(!collab.canEdit ? { inert: true } : {})}
+      >
         <div className="rounded-2xl border border-stone-200 bg-white p-8 shadow-sm">
           {/* ── Cover image with drag & drop ─────── */}
           <div className="mb-10 group">

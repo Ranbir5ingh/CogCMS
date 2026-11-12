@@ -7,7 +7,10 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useSite } from '@/components/admin/site-provider';
 import { uploadImageDirect } from '@/lib/media/upload-client';
 import { MediaPicker } from '@/components/admin/media-picker';
-import { useCollaboration, collaborationConflictMessage } from '@/lib/collaboration/use-collaboration';
+import {
+  useCollaboration,
+  collaborationConflictMessage,
+} from '@/lib/collaboration/use-collaboration';
 import { useCollaborationUi } from '@/components/admin/collaboration-panel';
 import { ConfirmDialog } from '@/components/admin/confirm-dialog';
 import { useLeaveGuard } from '@/lib/admin/use-leave-guard';
@@ -405,6 +408,7 @@ function Editor() {
   const [showImageUrl, setShowImageUrl] = useState(false);
   const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
   const [documentId, setDocumentId] = useState<string | null>(null);
+  const skipHydrateRef = useRef(false);
   const [savedUpdatedAt, setSavedUpdatedAt] = useState<string | null>(null);
   const [openPicker, setOpenPicker] = useState<'start' | 'end' | null>(null);
   const [imageUrlInput, setImageUrlInput] = useState('');
@@ -440,6 +444,11 @@ function Editor() {
       return;
     }
     if (!site?.id) return;
+    if (skipHydrateRef.current) {
+      skipHydrateRef.current = false;
+      setLoading(false);
+      return;
+    }
     const controller = new AbortController();
     setLoading(true);
     fetch(`/api/admin/events/${encodeURIComponent(editSlug)}`, {
@@ -609,8 +618,18 @@ function Editor() {
         status === 'publish' ? TOAST_MESSAGES.events.published : TOAST_MESSAGES.events.draftSaved,
       );
       clearFormState();
-      leaveGuard.leaveTo('/admin/dashboard/events');
-      router.refresh();
+      setSavedSnapshot(JSON.stringify(form));
+      const nextSlug = body.slug || form.slug;
+      setDocumentId(
+        typeof body._id === 'string' ? body._id : body._id ? String(body._id) : documentId,
+      );
+      setSavedUpdatedAt(typeof body.updatedAt === 'string' ? body.updatedAt : null);
+      if (!editSlug && nextSlug) {
+        skipHydrateRef.current = true;
+        router.replace(`/admin/dashboard/events/new?slug=${encodeURIComponent(nextSlug)}`, {
+          scroll: false,
+        });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save event.');
       showToast('error', err instanceof Error ? err.message : TOAST_MESSAGES.events.saveFailed);
@@ -730,7 +749,10 @@ function Editor() {
       {loading ? (
         <p className="py-12 text-stone-500">Loading event…</p>
       ) : (
-        <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start" {...(!collab.canEdit ? { inert: true } : {})}>
+        <div
+          className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start"
+          {...(!collab.canEdit ? { inert: true } : {})}
+        >
           <div className="min-w-0 space-y-5">
             <div className="space-y-4 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
               <h2 className="text-lg font-semibold">Event details</h2>

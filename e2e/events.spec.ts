@@ -189,8 +189,9 @@ test('events list uses the shared actions menu and shows save and delete toasts'
   expect(amountBox?.height).toBe(currencyBox?.height);
   await page.screenshot({ path: 'test-results/event-paid-price.png', fullPage: true });
   await page.getByRole('button', { name: 'Save draft' }).click();
-  await expect(page).toHaveURL(/\/admin\/dashboard\/events$/);
+  await expect(page).toHaveURL(/\/admin\/dashboard\/events\/new\?slug=/);
   await expect(toast(page, 'Event draft saved.')).toBeVisible();
+  await page.goto('/admin/dashboard/events');
   await page.getByLabel('Search events').fill(title);
   await expect(page.getByText('1 of 1 events')).toBeVisible();
   await page.getByRole('button', { name: `Actions for ${title}` }).click();
@@ -206,7 +207,7 @@ test('events list uses the shared actions menu and shows save and delete toasts'
   await expect(page.getByRole('button', { name: 'Currency code' })).toContainText('INR');
   const key = await issueReadKey(page);
   await page.getByRole('button', { name: 'Publish event' }).click();
-  await expect(page).toHaveURL(/\/admin\/dashboard\/events$/);
+  await expect(toast(page, /published/i)).toBeVisible();
   const response = await publicGet(page, `events/event-${id}`, key);
   expect(response.status()).toBe(200);
   expect((await response.json()).data).toMatchObject({
@@ -214,6 +215,7 @@ test('events list uses the shared actions menu and shows save and delete toasts'
     ticketPriceAmount: '499.50',
     ticketPriceCurrency: 'INR',
   });
+  await page.goto('/admin/dashboard/events');
   await page.getByRole('button', { name: `Actions for ${title}` }).click();
   await page.getByRole('menu').getByRole('button', { name: 'Delete' }).click();
   await confirmDelete(page);
