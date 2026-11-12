@@ -5,6 +5,7 @@ import { readJson, withAdmin } from '@/lib/http/admin-handler';
 import { notFound, validationError } from '@/lib/http/errors';
 import { estimateWhitepaperReadTime, whitepaperUpdateSchema } from '@/lib/validation/whitepaper';
 import { deliveryEventType, notifySiteWebhook } from '@/lib/webhook';
+import { assertEditable, assertFreshWrite, takeExpectedUpdatedAt } from '@/lib/collaboration/guard';
 
 export const dynamic = 'force-dynamic';
 type Params = { slug: string };
@@ -25,10 +26,14 @@ export const GET = withAdmin<Params>(async (_req, { params, site }) => {
 
 export const PUT = withAdmin<Params>(async (req, { params, user, site }) => {
   const { slug } = await params;
-  const update = updatePayload(await readJson(req));
+  const body = await readJson(req);
+  const expectedUpdatedAt = takeExpectedUpdatedAt(body);
+  const update = updatePayload(body);
   await connectToDatabase();
   const existing = await Whitepaper.findOne({ slug, siteId: site.id }).exec();
   if (!existing) throw notFound('Whitepaper');
+  assertFreshWrite(existing.updatedAt, expectedUpdatedAt);
+  await assertEditable(site.id, 'whitepaper', existing._id.toString(), user);
   if (update.readTime === '') {
     update.readTime = estimateWhitepaperReadTime(
       typeof update.content === 'string' ? update.content : existing.content,

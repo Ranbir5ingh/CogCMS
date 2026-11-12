@@ -97,17 +97,17 @@ test.describe('content editors', () => {
     await page.locator('textarea[name="description"], input[name="description"]').fill('About e2e');
     await typeInEditor(page, 'Whitepaper body written in the real editor.');
     await page.getByRole('button', { name: 'Save draft' }).click();
-    await expect(page).toHaveURL(/\/admin\/dashboard\/whitepapers$/);
+    await expect(page).toHaveURL(new RegExp(`/admin/dashboard/whitepapers/new\\?slug=${slug}`));
     expect((await adminGet<{ status: string }>(page, `whitepapers/${slug}`)).status).toBe('draft');
 
-    await rowAction(page, `Actions for ${title}`, 'Edit');
     await expect(page.locator('input[name="title"]')).toHaveValue(title);
     await page.getByRole('button', { name: 'Publish' }).click();
-    await expect(page).toHaveURL(/\/admin\/dashboard\/whitepapers$/);
+    await expect(page).toHaveURL(new RegExp(`/admin/dashboard/whitepapers/new\\?slug=${slug}`));
     expect((await adminGet<{ status: string }>(page, `whitepapers/${slug}`)).status).toBe(
       'publish',
     );
 
+    await page.goto('/admin/dashboard/whitepapers');
     await rowAction(page, `Actions for ${title}`, 'Delete');
     await confirmDelete(page);
     await expect(page.getByText(title)).toHaveCount(0);
@@ -147,16 +147,12 @@ test.describe('content editors', () => {
     await page.getByPlaceholder('Tell readers what your story is about...').fill('An excerpt.');
     await typeInEditor(page, 'A blog post body typed into Quill.');
     await page.getByRole('button', { name: 'Publish' }).click();
-    await expect(page).toHaveURL(/\/admin\/dashboard\/blogs$/);
+    await expect(page).toHaveURL(/\/admin\/dashboard\/blogs\/new\?slug=/);
+    await expect(page.getByPlaceholder('Title')).toHaveValue(title);
 
-    const row = page.getByText(title);
-    await expect(row).toBeVisible();
     const blogs = await adminGet<{ title: string; slug: string; status: string }[]>(page, 'blogs');
     const blog = blogs.find((b) => b.title === title)!;
     expect(blog.status).toBe('publish');
-
-    await rowAction(page, `Actions for ${title}`, 'Edit');
-    await expect(page.getByPlaceholder('Title')).toHaveValue(title);
     await page.getByRole('button', { name: 'Save draft' }).click();
     await expect(toast(page, 'Draft saved.')).toBeVisible();
     await expect

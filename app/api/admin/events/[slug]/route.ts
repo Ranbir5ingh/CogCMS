@@ -6,6 +6,7 @@ import { notFound, validationError } from '@/lib/http/errors';
 import { eventInputSchema } from '@/lib/validation/event';
 import { sanitizeBlogHtml } from '@/lib/sanitize-blog-html';
 import { deliveryEventType, notifySiteWebhook } from '@/lib/webhook';
+import { assertEditable, assertFreshWrite, takeExpectedUpdatedAt } from '@/lib/collaboration/guard';
 
 export const dynamic = 'force-dynamic';
 type Params = { slug: string };
@@ -16,11 +17,15 @@ export const GET = withAdmin<Params>(async (_req, { site, params }) => {
   return NextResponse.json(event);
 });
 export const PUT = withAdmin<Params>(async (req, { site, user, params }) => {
-  const parsed = eventInputSchema.safeParse(await readJson(req));
+  const body = await readJson(req);
+  const expectedUpdatedAt = takeExpectedUpdatedAt(body);
+  const parsed = eventInputSchema.safeParse(body);
   if (!parsed.success) throw validationError(parsed.error.flatten(), 'Invalid event');
   await connectToDatabase();
   const event = await Event.findOne({ siteId: site.id, slug: (await params).slug });
   if (!event) throw notFound('Event');
+  assertFreshWrite(event.updatedAt, expectedUpdatedAt);
+  await assertEditable(site.id, 'event', event._id.toString(), user);
   const before = event.status;
   const oldSlug = event.slug;
   event.set({ ...parsed.data, content: sanitizeBlogHtml(parsed.data.content), updatedBy: user.id });

@@ -1,7 +1,7 @@
 'use client';
 
-import { Suspense, useEffect, useMemo, useState, type ChangeEvent } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import 'react-quill-new/dist/quill.snow.css';
@@ -14,6 +14,13 @@ import { ConfirmDialog } from '@/components/admin/confirm-dialog';
 import { makeFormStateKey, useSessionFormState } from '@/lib/admin/session-form-state';
 import { useLeaveGuard } from '@/lib/admin/use-leave-guard';
 import { useEditorBaseline } from '@/lib/admin/use-editor-baseline';
+import {
+  useCollaboration,
+  collaborationConflictMessage,
+} from '@/lib/collaboration/use-collaboration';
+import { useCollaborationUi } from '@/components/admin/collaboration-panel';
+import { MediaPicker } from '@/components/admin/media-picker';
+import { isAllowedMediaUrl } from '@/lib/media/public-url';
 
 const ReactQuill = dynamic(() => import('react-quill-new'), { ssr: false });
 
@@ -35,6 +42,7 @@ interface WhitepaperFormData {
   metaDescription: string;
   keywords: string;
   content: string;
+  imageUrl: string;
 }
 
 const DEFAULT_DATA: WhitepaperFormData = {
@@ -55,6 +63,7 @@ const DEFAULT_DATA: WhitepaperFormData = {
   metaDescription: '',
   keywords: '',
   content: '',
+  imageUrl: '',
 };
 
 // Character limits per field; the Field component reads its own limit from here.
@@ -131,6 +140,7 @@ function formatPreviewDate(value: string) {
 function WhitepaperEditorForm() {
   const site = useSite();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const editSlug = searchParams.get('slug');
 
   const [formData, setFormData] = useState<WhitepaperFormData>(DEFAULT_DATA);
@@ -139,12 +149,24 @@ function WhitepaperEditorForm() {
   const [loading, setLoading] = useState(false);
   const [invalidField, setInvalidField] = useState<keyof WhitepaperFormData | null>(null);
   const [loadingData, setLoadingData] = useState(!!editSlug);
+  const [documentId, setDocumentId] = useState<string | null>(null);
+  const skipHydrateRef = useRef(false);
+  const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
+  const [showImageUrl, setShowImageUrl] = useState(false);
+  const [imageUrlInput, setImageUrlInput] = useState('');
+  const [savedUpdatedAt, setSavedUpdatedAt] = useState<string | null>(null);
   const [savedSnapshot, setSavedSnapshot] = useState(() => JSON.stringify(DEFAULT_DATA));
   const isDirty = JSON.stringify(formData) !== savedSnapshot;
   const { showToast } = useToast();
 
   useEffect(() => {
     if (!editSlug) return;
+    if (skipHydrateRef.current) {
+      skipHydrateRef.current = false;
+      setOriginalSlug(editSlug);
+      setLoadingData(false);
+      return;
+    }
 
     setLoadingData(true);
     setOriginalSlug(editSlug);
@@ -185,9 +207,12 @@ function WhitepaperEditorForm() {
           metaDescription: data.metaDescription || '',
           keywords: data.keywords || '',
           content: data.content || '',
+          imageUrl: data.imageUrl || '',
         };
         setFormData(loaded);
         setSavedSnapshot(JSON.stringify(loaded));
+        setDocumentId(typeof data._id === 'string' ? data._id : data._id ? String(data._id) : null);
+        setSavedUpdatedAt(typeof data.updatedAt === 'string' ? data.updatedAt : null);
 
         setSlugManuallyEdited(true);
       })
@@ -213,6 +238,8 @@ function WhitepaperEditorForm() {
     },
   });
   const leaveGuard = useLeaveGuard(isDirty, clearFormState);
+  const collab = useCollaboration({ resourceType: 'whitepaper', resourceId: documentId });
+  const collabUi = useCollaborationUi(collab);
 
   const computedReadTime = useMemo(() => estimateReadTime(formData.content), [formData.content]);
   const quillModules = useMemo(
@@ -231,7 +258,7 @@ function WhitepaperEditorForm() {
     }),
     [],
   );
-  const quillFormats = ['header', 'list', 'bullet'];
+  const quillFormats = ['header', 'list'];
 
   const previewWhitepaper = useMemo(() => {
     const tags = formData.tags
@@ -354,6 +381,7 @@ function WhitepaperEditorForm() {
       metaDescription: formData.metaDescription,
       keywords: formData.keywords,
       content: formData.content,
+      imageUrl: formData.imageUrl,
       status,
     };
 
@@ -364,12 +392,18 @@ function WhitepaperEditorForm() {
       const res = await fetch(endpoint, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          ...payload,
+          ...(isEdit && savedUpdatedAt ? { expectedUpdatedAt: savedUpdatedAt } : {}),
+        }),
       });
 
       const data = await res.json();
       if (!res.ok) {
-        showToast('error', data.error || TOAST_MESSAGES.whitepapers.saveFailed);
+        showToast(
+          'error',
+          collaborationConflictMessage(data) || data.error || TOAST_MESSAGES.whitepapers.saveFailed,
+        );
         return;
       }
 
@@ -382,7 +416,17 @@ function WhitepaperEditorForm() {
           : TOAST_MESSAGES.whitepapers.draftSaved,
       );
       clearFormState();
-      leaveGuard.leaveTo('/admin/dashboard/whitepapers');
+      setSavedSnapshot(JSON.stringify(formData));
+      const nextSlug = data.slug || formData.slug;
+      setOriginalSlug(nextSlug);
+      setDocumentId(typeof data._id === 'string' ? data._id : data._id ? String(data._id) : null);
+      setSavedUpdatedAt(typeof data.updatedAt === 'string' ? data.updatedAt : null);
+      if (!isEdit && nextSlug) {
+        skipHydrateRef.current = true;
+        router.replace(`/admin/dashboard/whitepapers/new?slug=${encodeURIComponent(nextSlug)}`, {
+          scroll: false,
+        });
+      }
     } catch (submitError: any) {
       showToast('error', submitError.message || TOAST_MESSAGES.whitepapers.saveFailed);
     } finally {
@@ -404,11 +448,13 @@ function WhitepaperEditorForm() {
             {editSlug ? 'Edit whitepaper' : 'New whitepaper'}
           </h1>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {collabUi.presence}
           <button
             type="button"
             onClick={() => handleSubmit('draft')}
-            disabled={loading || loadingData}
+            disabled={loading || loadingData || !collab.canEdit}
+            title={!collab.canEdit ? 'Someone else is editing this document' : undefined}
             className="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-stone-700 disabled:opacity-50"
           >
             Save draft
@@ -416,19 +462,108 @@ function WhitepaperEditorForm() {
           <button
             type="button"
             onClick={() => handleSubmit('publish')}
-            disabled={loading || loadingData}
+            disabled={loading || loadingData || !collab.canEdit}
+            title={!collab.canEdit ? 'Someone else is editing this document' : undefined}
             className="rounded-xl bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-orange-700 disabled:opacity-50"
           >
             {loading ? 'Saving…' : 'Publish'}
           </button>
         </div>
       </div>
+      {collabUi.sidebar}
+      {collabUi.banner}
 
       {loadingData ? (
         <p className="py-12 text-sm text-stone-500">Loading whitepaper…</p>
       ) : (
-        <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_520px] lg:items-start">
+        <div
+          className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_520px] lg:items-start"
+          {...(!collab.canEdit ? { inert: true } : {})}
+        >
           <div className="space-y-5 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
+            <div>
+              <p className="mb-2 text-sm font-medium text-stone-700">Cover image</p>
+              {formData.imageUrl ? (
+                <div className="relative aspect-[16/9] overflow-hidden rounded-xl bg-stone-100">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={formData.imageUrl}
+                    alt="Whitepaper cover"
+                    className="h-full w-full object-cover"
+                  />
+                  <div className="absolute right-3 top-3 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setMediaPickerOpen(true)}
+                      className="rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs font-medium shadow-sm"
+                    >
+                      Change cover
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFormData((current) => ({ ...current, imageUrl: '' }))}
+                      className="rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs font-medium text-red-700 shadow-sm"
+                    >
+                      Remove cover
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex min-h-40 flex-col items-center justify-center rounded-xl border-2 border-dashed border-stone-200 bg-stone-50/50 p-6 text-center">
+                  <p className="text-sm font-medium text-stone-600">Add a cover image</p>
+                  <p className="mt-1 text-xs text-stone-500">
+                    Choose from the media library, or paste a URL
+                  </p>
+                  <div className="mt-4 flex flex-wrap justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setMediaPickerOpen(true)}
+                      className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50"
+                    >
+                      Choose from library
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowImageUrl((current) => !current)}
+                      aria-expanded={showImageUrl}
+                      className="rounded-lg px-3 py-2 text-xs font-semibold text-orange-700 hover:bg-orange-50"
+                    >
+                      {showImageUrl ? 'Hide URL' : 'Paste URL'}
+                    </button>
+                  </div>
+                  {showImageUrl && (
+                    <div className="mt-3 flex w-full max-w-sm items-end gap-2">
+                      <label className="min-w-0 flex-1 text-left text-xs font-medium text-stone-600">
+                        Image URL
+                        <input
+                          className="mt-1 w-full rounded-xl border border-stone-300 px-3 py-2 text-sm"
+                          type="url"
+                          value={imageUrlInput}
+                          onChange={(event) => setImageUrlInput(event.target.value)}
+                          placeholder="https://example.com/image.jpg"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const value = imageUrlInput.trim();
+                          if (!isAllowedMediaUrl(value)) {
+                            showToast('error', 'Enter a valid image URL.');
+                            return;
+                          }
+                          setFormData((current) => ({ ...current, imageUrl: value }));
+                          setShowImageUrl(false);
+                        }}
+                        className="rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm font-semibold"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div className="grid gap-4 sm:grid-cols-2">
               <Field
                 label="Title"
@@ -590,6 +725,7 @@ function WhitepaperEditorForm() {
                 <ReactQuill
                   useSemanticHTML={false}
                   theme="snow"
+                  readOnly={!collab.canEdit}
                   value={formData.content}
                   onChange={(value: string, _delta: unknown, source: string) => {
                     setFormData((prev) => ({ ...prev, content: value }));
@@ -625,6 +761,15 @@ function WhitepaperEditorForm() {
           </aside>
         </div>
       )}
+      <MediaPicker
+        open={mediaPickerOpen}
+        onOpenChange={setMediaPickerOpen}
+        defaultSize="large"
+        title="Choose a cover image"
+        onPick={(pick) => {
+          setFormData((current) => ({ ...current, imageUrl: pick.url }));
+        }}
+      />
       <ConfirmDialog {...leaveGuard.dialogProps} />
     </section>
   );
@@ -657,28 +802,30 @@ function Field({
   }`;
 
   return (
-    <label className="grid gap-1.5 text-xs font-semibold uppercase tracking-wider text-stone-500">
-      {label}
-      {multiline ? (
-        <textarea
-          name={name}
-          value={value}
-          onChange={onChange}
-          placeholder={placeholder}
-          maxLength={maxLength}
-          className={`${inputClass} min-h-[88px]`}
-        />
-      ) : (
-        <input
-          type={type}
-          name={name}
-          value={value}
-          onChange={onChange}
-          placeholder={placeholder}
-          maxLength={maxLength}
-          className={inputClass}
-        />
-      )}
+    <div className="grid gap-1.5">
+      <label className="grid gap-1.5 text-xs font-semibold uppercase tracking-wider text-stone-500">
+        {label}
+        {multiline ? (
+          <textarea
+            name={name}
+            value={value}
+            onChange={onChange}
+            placeholder={placeholder}
+            maxLength={maxLength}
+            className={`${inputClass} min-h-[88px]`}
+          />
+        ) : (
+          <input
+            type={type}
+            name={name}
+            value={value}
+            onChange={onChange}
+            placeholder={placeholder}
+            maxLength={maxLength}
+            className={inputClass}
+          />
+        )}
+      </label>
       {(hint || maxLength) && (
         <span className="flex justify-between gap-2 text-[11px] font-normal normal-case tracking-normal text-stone-400">
           <span>{hint}</span>
@@ -689,7 +836,7 @@ function Field({
           )}
         </span>
       )}
-    </label>
+    </div>
   );
 }
 

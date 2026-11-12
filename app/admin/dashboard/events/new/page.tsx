@@ -6,6 +6,12 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useSite } from '@/components/admin/site-provider';
 import { uploadImageDirect } from '@/lib/media/upload-client';
+import { MediaPicker } from '@/components/admin/media-picker';
+import {
+  useCollaboration,
+  collaborationConflictMessage,
+} from '@/lib/collaboration/use-collaboration';
+import { useCollaborationUi } from '@/components/admin/collaboration-panel';
 import { ConfirmDialog } from '@/components/admin/confirm-dialog';
 import { useLeaveGuard } from '@/lib/admin/use-leave-guard';
 import {
@@ -400,6 +406,10 @@ function Editor() {
   >({});
   const [dragging, setDragging] = useState(false);
   const [showImageUrl, setShowImageUrl] = useState(false);
+  const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
+  const [documentId, setDocumentId] = useState<string | null>(null);
+  const skipHydrateRef = useRef(false);
+  const [savedUpdatedAt, setSavedUpdatedAt] = useState<string | null>(null);
   const [openPicker, setOpenPicker] = useState<'start' | 'end' | null>(null);
   const [imageUrlInput, setImageUrlInput] = useState('');
   const fileInput = useRef<HTMLInputElement>(null);
@@ -434,6 +444,11 @@ function Editor() {
       return;
     }
     if (!site?.id) return;
+    if (skipHydrateRef.current) {
+      skipHydrateRef.current = false;
+      setLoading(false);
+      return;
+    }
     const controller = new AbortController();
     setLoading(true);
     fetch(`/api/admin/events/${encodeURIComponent(editSlug)}`, {
@@ -456,6 +471,8 @@ function Editor() {
         };
         setForm(loaded);
         setSavedSnapshot(JSON.stringify(loaded));
+        setDocumentId(typeof data._id === 'string' ? data._id : data._id ? String(data._id) : null);
+        setSavedUpdatedAt(typeof data.updatedAt === 'string' ? data.updatedAt : null);
       })
       .catch((err) => {
         if (!controller.signal.aborted) {
@@ -509,6 +526,8 @@ function Editor() {
     };
   }, [storageKey, isDirty, form]);
   const leaveGuard = useLeaveGuard(isDirty, clearFormState);
+  const collab = useCollaboration({ resourceType: 'event', resourceId: documentId });
+  const collabUi = useCollaborationUi(collab);
   const modules = useMemo(
     () => ({
       toolbar: [
@@ -576,11 +595,16 @@ function Editor() {
         {
           method: editSlug ? 'PUT' : 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data),
+          body: JSON.stringify({
+            ...data,
+            ...(editSlug && savedUpdatedAt ? { expectedUpdatedAt: savedUpdatedAt } : {}),
+          }),
         },
       );
       const body = await res.json();
       if (!res.ok) {
+        const conflict = collaborationConflictMessage(body);
+        if (conflict) throw new Error(conflict);
         const fields = body.details?.fieldErrors;
         const first =
           fields &&
@@ -594,8 +618,18 @@ function Editor() {
         status === 'publish' ? TOAST_MESSAGES.events.published : TOAST_MESSAGES.events.draftSaved,
       );
       clearFormState();
-      leaveGuard.leaveTo('/admin/dashboard/events');
-      router.refresh();
+      setSavedSnapshot(JSON.stringify(form));
+      const nextSlug = body.slug || form.slug;
+      setDocumentId(
+        typeof body._id === 'string' ? body._id : body._id ? String(body._id) : documentId,
+      );
+      setSavedUpdatedAt(typeof body.updatedAt === 'string' ? body.updatedAt : null);
+      if (!editSlug && nextSlug) {
+        skipHydrateRef.current = true;
+        router.replace(`/admin/dashboard/events/new?slug=${encodeURIComponent(nextSlug)}`, {
+          scroll: false,
+        });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save event.');
       showToast('error', err instanceof Error ? err.message : TOAST_MESSAGES.events.saveFailed);
@@ -685,16 +719,19 @@ function Editor() {
           </h1>
           <p className="mt-2 text-sm text-stone-500">Share an experience with your audience.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {collabUi.presence}
           <button
-            disabled={busy || loading}
+            disabled={busy || loading || !collab.canEdit}
+            title={!collab.canEdit ? 'Someone else is editing this document' : undefined}
             onClick={() => save('draft')}
             className="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold disabled:opacity-50"
           >
             Save draft
           </button>
           <button
-            disabled={busy || loading}
+            disabled={busy || loading || !collab.canEdit}
+            title={!collab.canEdit ? 'Someone else is editing this document' : undefined}
             onClick={() => save('publish')}
             className="rounded-xl bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-orange-700 disabled:opacity-50"
           >
@@ -702,6 +739,8 @@ function Editor() {
           </button>
         </div>
       </div>
+      {collabUi.sidebar}
+      {collabUi.banner}
       {error && (
         <p role="alert" className="mt-5 rounded-xl bg-red-50 p-4 text-sm text-red-700">
           {error}
@@ -710,7 +749,10 @@ function Editor() {
       {loading ? (
         <p className="py-12 text-stone-500">Loading event…</p>
       ) : (
-        <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
+        <div
+          className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start"
+          {...(!collab.canEdit ? { inert: true } : {})}
+        >
           <div className="min-w-0 space-y-5">
             <div className="space-y-4 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
               <h2 className="text-lg font-semibold">Event details</h2>
@@ -727,7 +769,7 @@ function Editor() {
                       <button
                         type="button"
                         disabled={busy}
-                        onClick={() => fileInput.current?.click()}
+                        onClick={() => setMediaPickerOpen(true)}
                         className="rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs font-medium shadow-sm disabled:opacity-50"
                       >
                         Change cover
@@ -758,7 +800,7 @@ function Editor() {
                     onDrop={(event) => {
                       event.preventDefault();
                       setDragging(false);
-                      if (!busy) void upload(event.dataTransfer.files[0]);
+                      if (!busy) setMediaPickerOpen(true);
                     }}
                     className={`flex min-h-48 flex-col items-center justify-center rounded-xl border-2 border-dashed p-6 text-center transition-colors ${dragging ? 'border-orange-500 bg-orange-50' : 'border-stone-200 bg-stone-50/50'}`}
                   >
@@ -786,10 +828,10 @@ function Editor() {
                       <button
                         type="button"
                         disabled={busy}
-                        onClick={() => fileInput.current?.click()}
+                        onClick={() => setMediaPickerOpen(true)}
                         className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50 disabled:opacity-50"
                       >
-                        {busy ? 'Uploading…' : 'Choose image'}
+                        Choose from library
                       </button>
                       <button
                         type="button"
@@ -888,6 +930,7 @@ function Editor() {
                 >
                   <ReactQuill
                     theme="snow"
+                    readOnly={!collab.canEdit}
                     value={form.content}
                     onChange={(value) => set('content', value)}
                     modules={modules}
@@ -1087,6 +1130,16 @@ function Editor() {
           </aside>
         </div>
       )}
+      <MediaPicker
+        open={mediaPickerOpen}
+        onOpenChange={setMediaPickerOpen}
+        defaultSize="large"
+        title="Choose a cover image"
+        onPick={(pick) => {
+          setForm((current) => ({ ...current, imageUrl: pick.url, imageAlt: pick.alt }));
+          showToast('success', TOAST_MESSAGES.events.coverUploaded);
+        }}
+      />
       <ConfirmDialog {...leaveGuard.dialogProps} />
     </section>
   );

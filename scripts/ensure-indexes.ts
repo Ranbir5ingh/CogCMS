@@ -12,6 +12,8 @@ import ReleaseNote from '@/models/ReleaseNote';
 import Site from '@/models/Site';
 import User from '@/models/User';
 import Whitepaper from '@/models/Whitepaper';
+import ContentLock from '@/models/ContentLock';
+import ContentPresence from '@/models/ContentPresence';
 import { modelRegistry } from '@/scripts/model-registry';
 
 type UniqueCheck = { model: Model<any>; fields: string[] };
@@ -27,6 +29,8 @@ const uniqueChecks: UniqueCheck[] = [
   { model: NewsletterSubscriber, fields: ['siteId', 'email'] },
   { model: ReleaseNote, fields: ['siteId', 'slug'] },
   { model: ApiKey, fields: ['prefix'] },
+  { model: ContentLock, fields: ['siteId', 'resourceType', 'resourceId'] },
+  { model: ContentPresence, fields: ['siteId', 'resourceType', 'resourceId', 'userId'] },
 ];
 
 function printable(value: unknown): string {

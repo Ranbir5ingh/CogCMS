@@ -10,7 +10,8 @@ import { ConfirmDialog } from '@/components/admin/confirm-dialog';
 import { makeFormStateKey, useSessionFormState } from '@/lib/admin/session-form-state';
 import { useLeaveGuard } from '@/lib/admin/use-leave-guard';
 import { slugify } from '@/lib/blog-content/slugify';
-import { isPublicHttpUrl } from '@/lib/validation/common';
+import { isAllowedMediaUrl } from '@/lib/media/public-url';
+import { MediaPicker } from '@/components/admin/media-picker';
 
 export interface AdminAuthorView {
   _id: string;
@@ -39,6 +40,7 @@ export function AuthorForm({ author }: { author?: AdminAuthorView }) {
   const router = useRouter();
   const [form, setForm] = useState(() => fromAuthor(author));
   const [errors, setErrors] = useState<{ slug?: string; avatarUrl?: string }>({});
+  const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const { showToast } = useToast();
   const editing = Boolean(author);
@@ -72,7 +74,7 @@ export function AuthorForm({ author }: { author?: AdminAuthorView }) {
           const avatarUrl = form.avatarUrl.trim();
           const nextErrors: { slug?: string; avatarUrl?: string } = {};
           if (!SLUG_PATTERN.test(slug)) nextErrors.slug = TOAST_MESSAGES.authors.invalidSlug;
-          if (avatarUrl && !isPublicHttpUrl(avatarUrl)) {
+          if (avatarUrl && !isAllowedMediaUrl(avatarUrl)) {
             nextErrors.avatarUrl = TOAST_MESSAGES.authors.invalidAvatarUrl;
           }
           if (nextErrors.slug || nextErrors.avatarUrl) {
@@ -192,11 +194,27 @@ export function AuthorForm({ author }: { author?: AdminAuthorView }) {
                 // Deliberately not type="url": the browser's native bubble would pre-empt
                 // the inline message this form shows for every other field.
                 inputMode="url"
-                helper="Optional. Must be a full http(s) link when provided."
+                helper="Optional. Choose an image from the library, or paste a full http(s) link."
                 error={errors.avatarUrl}
                 placeholder="https://cdn.example.com/jane.jpg"
                 {...field('avatarUrl')}
               />
+              <div className="mt-2 flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setMediaPickerOpen(true)}
+                  className="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-xs font-semibold text-stone-700 hover:bg-stone-50"
+                >
+                  Choose from library
+                </button>
+                {form.avatarUrl ? (
+                  <img
+                    src={form.avatarUrl}
+                    alt=""
+                    className="h-10 w-10 rounded-full object-cover ring-1 ring-stone-200"
+                  />
+                ) : null}
+              </div>
             </div>
           </fieldset>
 
@@ -214,6 +232,16 @@ export function AuthorForm({ author }: { author?: AdminAuthorView }) {
           </fieldset>
         </div>
       </form>
+      <MediaPicker
+        open={mediaPickerOpen}
+        onOpenChange={setMediaPickerOpen}
+        defaultSize="medium"
+        title="Choose an author avatar"
+        onPick={(pick) => {
+          setForm((state) => ({ ...state, avatarUrl: pick.url }));
+          setErrors((current) => ({ ...current, avatarUrl: undefined }));
+        }}
+      />
       <ConfirmDialog {...leaveGuard.dialogProps} />
     </>
   );

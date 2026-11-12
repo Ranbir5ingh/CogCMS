@@ -44,6 +44,12 @@ describe('author validation', () => {
     }
   });
 
+  it('accepts a first-party media library URL as an avatar', () => {
+    const token = 'e'.repeat(32);
+    const url = `http://localhost:3003/media/sites/demo/2026-11-12/${token}.jpg`;
+    expect(authorInputSchema.safeParse({ ...valid, avatarUrl: url }).success).toBe(true);
+  });
+
   it('rejects a slug that is not lowercase and URL-safe', () => {
     for (const slug of ['Jane Doe', 'jane_doe', 'jane--doe!', '']) {
       expect(authorInputSchema.safeParse({ ...valid, slug }).success).toBe(false);

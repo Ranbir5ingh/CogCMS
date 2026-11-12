@@ -9,6 +9,7 @@ import { renderBlogSnapshot } from '@/lib/render/blog';
 import { invalidateRelatedPosts } from '@/lib/blog-content/related-index';
 import { deliveryEventType, notifySiteWebhook } from '@/lib/webhook';
 import { assertBlogAuthorIsUsable } from '@/lib/admin/blog-author';
+import { assertEditable, assertFreshWrite, takeExpectedUpdatedAt } from '@/lib/collaboration/guard';
 
 export const dynamic = 'force-dynamic';
 type Params = { slug: string };
@@ -23,12 +24,16 @@ export const GET = withAdmin<Params>(async (_req, { params, site }) => {
 
 export const PUT = withAdmin<Params>(async (req, { params, user, site }) => {
   const { slug } = await params;
-  const parsed = blogInputSchema.partial().safeParse(await readJson(req));
+  const body = await readJson(req);
+  const expectedUpdatedAt = takeExpectedUpdatedAt(body);
+  const parsed = blogInputSchema.partial().safeParse(body);
   if (!parsed.success) throw validationError(parsed.error.flatten(), 'Invalid blog payload');
 
   await connectToDatabase();
   const existing = await Blog.findOne({ slug, siteId: site.id }).exec();
   if (!existing) throw notFound('Blog');
+  assertFreshWrite(existing.updatedAt, expectedUpdatedAt);
+  await assertEditable(site.id, 'blog', existing._id.toString(), user);
 
   const nextStatus = parsed.data.status ?? existing.status;
   const nextAuthorId =

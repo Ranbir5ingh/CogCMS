@@ -1,11 +1,11 @@
 import { z } from 'zod';
 import {
   optionalTextSchema,
-  optionalUrlSchema,
   publicationStatusSchema,
   requiredTextSchema,
   slugSchema,
 } from './common';
+import { optionalMediaUrlSchema } from '@/lib/validation/media';
 
 export const authorInputSchema = z
   .object({
@@ -13,7 +13,7 @@ export const authorInputSchema = z
     slug: slugSchema,
     role: optionalTextSchema,
     bio: optionalTextSchema,
-    avatarUrl: optionalUrlSchema,
+    avatarUrl: optionalMediaUrlSchema,
     socials: z
       .object({
         x: optionalTextSchema,

@@ -262,7 +262,7 @@ function ReleaseNoteEditor() {
                   value={bodyHtml}
                   onChange={setBodyHtml}
                   modules={modules}
-                  formats={['header', 'bold', 'list', 'bullet', 'link']}
+                  formats={['header', 'bold', 'list', 'link']}
                 />
               </div>
               <p className="mt-2 text-xs text-stone-500">

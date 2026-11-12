@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback, useMemo, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import 'react-quill-new/dist/quill.bubble.css';
 import '../editor-table.css';
@@ -26,6 +26,12 @@ import { makeFormStateKey, useSessionFormState } from '@/lib/admin/session-form-
 import { useLeaveGuard } from '@/lib/admin/use-leave-guard';
 import { useEditorBaseline } from '@/lib/admin/use-editor-baseline';
 import { uploadImageDirect } from '@/lib/media/upload-client';
+import { MediaPicker, type MediaPick } from '@/components/admin/media-picker';
+import {
+  useCollaboration,
+  collaborationConflictMessage,
+} from '@/lib/collaboration/use-collaboration';
+import { useCollaborationUi } from '@/components/admin/collaboration-panel';
 import {
   CLIENT_UPLOAD_OUTPUT_TYPE,
   CLIENT_UPLOAD_TARGET_BYTES,
@@ -474,7 +480,6 @@ function ShortcutsPanel({ onClose }: { onClose: () => void }) {
   );
 }
 
-
 const SLUG_MAX_LENGTH = 160;
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -482,7 +487,9 @@ const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 function EditorForm() {
   const site = useSite();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const editSlug = searchParams.get('slug');
+  const skipHydrateRef = useRef(false);
 
   const [loadingData, setLoadingData] = useState(!!editSlug);
   const [originalSlug, setOriginalSlug] = useState<string | null>(null);
@@ -511,9 +518,12 @@ function EditorForm() {
   const [imageType, setImageType] = useState<'url' | 'upload'>('url');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inlineImageRef = useRef<HTMLInputElement>(null);
+  const [mediaPicker, setMediaPicker] = useState<null | 'cover' | 'inline'>(null);
   const quillRef = useRef<any>(null);
   const [promptRequest, setPromptRequest] = useState<PromptRequest | null>(null);
   const savedRange = useRef<number | null>(null);
+  const [documentId, setDocumentId] = useState<string | null>(null);
+  const [savedUpdatedAt, setSavedUpdatedAt] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     title: '',
@@ -544,6 +554,12 @@ function EditorForm() {
   // Fetch existing blog if editSlug
   useEffect(() => {
     if (!editSlug) return;
+    if (skipHydrateRef.current) {
+      skipHydrateRef.current = false;
+      setOriginalSlug(editSlug);
+      setLoadingData(false);
+      return;
+    }
     setOriginalSlug(editSlug);
     setLoadingData(true);
     fetch(`/api/admin/blogs/${editSlug}`, { cache: 'no-store' })
@@ -578,6 +594,10 @@ function EditorForm() {
           setFormData(hydrated);
           setContent(data.content || '');
           setLastPublishedAt(data.status === 'publish' ? data.updatedAt || null : null);
+          setDocumentId(
+            typeof data._id === 'string' ? data._id : data._id ? String(data._id) : null,
+          );
+          setSavedUpdatedAt(typeof data.updatedAt === 'string' ? data.updatedAt : null);
           setSlugManuallyEdited(true);
           initialSnapshotRef.current = JSON.stringify({
             ...hydrated,
@@ -623,6 +643,8 @@ function EditorForm() {
     },
   });
   const leaveGuard = useLeaveGuard(isDirty, clearFormState);
+  const collab = useCollaboration({ resourceType: 'blog', resourceId: documentId });
+  const collabUi = useCollaborationUi(collab);
 
   // ── Auto-resize textareas ─────────────────────
   useEffect(() => {
@@ -723,7 +745,31 @@ function EditorForm() {
 
   // ── Insert actions — use Quill API at cursor ───
   const handleInsertImage = () => {
-    inlineImageRef.current?.click();
+    setMediaPicker('inline');
+  };
+
+  const applyMediaPick = (pick: MediaPick, mode: 'cover' | 'inline') => {
+    if (mode === 'cover') {
+      setFormData((prev) => ({ ...prev, imageUrl: pick.url, imageAlt: pick.alt }));
+      showToast('success', TOAST_MESSAGES.blogEditor.coverUploaded);
+      return;
+    }
+    const quill = (quillRef.current as any)?.getEditor?.();
+    if (quill) {
+      const range = quill.getSelection(true);
+      const index = range ? range.index : quill.getLength();
+      quill.insertEmbed(index, 'image', pick.url);
+      const [leaf] = quill.getLeaf(index);
+      const node = leaf?.domNode as HTMLElement | undefined;
+      if (node?.tagName === 'IMG') node.setAttribute('alt', pick.alt);
+      quill.setSelection(index + 1);
+    } else {
+      const safeAlt = pick.alt.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+      setContent(
+        (prev) => prev + `<p><img src="${pick.url}" alt="${safeAlt}" style="max-width:100%" /></p>`,
+      );
+    }
+    showToast('success', TOAST_MESSAGES.blogEditor.imageInserted);
   };
 
   const handleInlineImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -977,6 +1023,7 @@ function EditorForm() {
           keyTakeaways: cleanTakeaways,
           relatedSlugs: formData.relatedSlugs,
           tocOverrides: formData.tocOverrides,
+          ...(isEdit && savedUpdatedAt ? { expectedUpdatedAt: savedUpdatedAt } : {}),
         }),
       });
 
@@ -984,14 +1031,14 @@ function EditorForm() {
       if (!res.ok) {
         showToast(
           'error',
-          data.details?.fieldErrors?.authorId?.[0] ||
+          collaborationConflictMessage(data) ||
+            data.details?.fieldErrors?.authorId?.[0] ||
             data.error ||
             TOAST_MESSAGES.blogEditor.saveFailed,
         );
         return;
       }
       initialSnapshotRef.current = JSON.stringify({ ...formData, content });
-      // The provider lives in the dashboard layout, so this survives the redirect.
       showToast(
         'success',
         action === 'publish'
@@ -1001,7 +1048,16 @@ function EditorForm() {
           : TOAST_MESSAGES.blogEditor.draftSaved,
       );
       clearFormState();
-      leaveGuard.leaveTo('/admin/dashboard/blogs');
+      const nextSlug = data.slug || formData.slug;
+      setOriginalSlug(nextSlug);
+      setDocumentId(typeof data._id === 'string' ? data._id : data._id ? String(data._id) : null);
+      setSavedUpdatedAt(typeof data.updatedAt === 'string' ? data.updatedAt : null);
+      if (!isEdit && nextSlug) {
+        skipHydrateRef.current = true;
+        router.replace(`/admin/dashboard/blogs/new?slug=${encodeURIComponent(nextSlug)}`, {
+          scroll: false,
+        });
+      }
     } catch (err: any) {
       showToast('error', err.message || TOAST_MESSAGES.blogEditor.saveFailed);
     } finally {
@@ -1092,13 +1148,25 @@ function EditorForm() {
 
   return (
     <div className="min-h-screen text-[#1a1a1a]">
-      {/* Hidden file inputs */}
+      {collabUi.sidebar}
+      {/* Hidden file inputs — kept as a fallback; the library picker is the primary path. */}
       <input
         type="file"
         ref={inlineImageRef}
         onChange={handleInlineImageUpload}
         className="hidden"
         accept="image/*"
+      />
+      <MediaPicker
+        open={mediaPicker !== null}
+        onOpenChange={(open) => {
+          if (!open) setMediaPicker(null);
+        }}
+        defaultSize={mediaPicker === 'inline' ? 'medium' : 'large'}
+        title={mediaPicker === 'inline' ? 'Insert an image' : 'Choose a cover image'}
+        onPick={(pick) => {
+          if (mediaPicker) applyMediaPick(pick, mediaPicker);
+        }}
       />
 
       {/* ── Sticky top bar ──────────────────────── */}
@@ -1187,10 +1255,12 @@ function EditorForm() {
             </svg>
           </button>
 
+          {collabUi.presence}
           <button
             type="button"
             onClick={() => handleSubmit('draft')}
-            disabled={loading}
+            disabled={loading || !collab.canEdit}
+            title={!collab.canEdit ? 'Someone else is editing this document' : undefined}
             className="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-stone-700 disabled:opacity-50"
           >
             Save draft
@@ -1199,7 +1269,8 @@ function EditorForm() {
             <button
               type="button"
               onClick={() => handleSubmit('publish')}
-              disabled={loading}
+              disabled={loading || !collab.canEdit}
+              title={!collab.canEdit ? 'Someone else is editing this document' : undefined}
               className="rounded-xl bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-orange-700 disabled:opacity-50"
             >
               {loading ? 'Publishing...' : 'Publish'}
@@ -1221,8 +1292,12 @@ function EditorForm() {
         </div>
       </div>
 
+      {collabUi.banner}
       {/* ── Main editor canvas ─────────────────── */}
-      <main className="max-w-[860px] mx-auto px-6 pt-10 pb-32">
+      <main
+        className="max-w-[860px] mx-auto px-6 pt-10 pb-32"
+        {...(!collab.canEdit ? { inert: true } : {})}
+      >
         <div className="rounded-2xl border border-stone-200 bg-white p-8 shadow-sm">
           {/* ── Cover image with drag & drop ─────── */}
           <div className="mb-10 group">
@@ -1259,7 +1334,7 @@ function EditorForm() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={() => setMediaPicker('cover')}
                   className="absolute bottom-3 right-3 bg-white/90 backdrop-blur text-gray-700 px-3 py-1.5 rounded-lg text-xs hover:bg-white transition-colors opacity-0 group-hover:opacity-100 flex items-center gap-1.5"
                   style={{ fontWeight: 500 }}
                 >
@@ -1288,8 +1363,12 @@ function EditorForm() {
                 }`}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                onClick={() => !isDragging && fileInputRef.current?.click()}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  setIsDragging(false);
+                  setMediaPicker('cover');
+                }}
+                onClick={() => !isDragging && setMediaPicker('cover')}
               >
                 <svg
                   className="w-7 h-7 text-gray-300 mb-3"
@@ -1540,6 +1619,7 @@ function EditorForm() {
                 useSemanticHTML={false}
                 {...({ ref: quillRef } as any)}
                 theme="bubble"
+                readOnly={!collab.canEdit}
                 value={content}
                 onChange={(value: string, _delta: unknown, source: string) => {
                   setContent(value);

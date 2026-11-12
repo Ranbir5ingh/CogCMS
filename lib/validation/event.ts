@@ -1,10 +1,6 @@
 import { z } from 'zod';
-import {
-  optionalUrlSchema,
-  publicationStatusSchema,
-  requiredSourceTextSchema,
-  requiredTextSchema,
-} from './common';
+import { publicationStatusSchema, requiredSourceTextSchema, requiredTextSchema } from './common';
+import { optionalMediaUrlSchema } from '@/lib/validation/media';
 
 const date = z.string().datetime({ offset: true });
 export const optionalEventUrlSchema = z
@@ -34,7 +30,7 @@ export const eventInputSchema = z
     slug: eventSlugSchema,
     summary: z.string().max(3000).default(''),
     content: requiredSourceTextSchema,
-    imageUrl: optionalUrlSchema,
+    imageUrl: optionalMediaUrlSchema,
     imageAlt: z.string().default(''),
     startAt: date,
     endAt: date,
