@@ -13,6 +13,9 @@ import Site from '@/models/Site';
 import User from '@/models/User';
 import Whitepaper from '@/models/Whitepaper';
 import Media from '@/models/Media';
+import ContentLock from '@/models/ContentLock';
+import ContentPresence from '@/models/ContentPresence';
+import ContentComment from '@/models/ContentComment';
 
 export const modelRegistry: Model<any>[] = [
   Site,
@@ -29,4 +32,7 @@ export const modelRegistry: Model<any>[] = [
   ApiKey,
   IntakeRateLimit,
   Media,
+  ContentLock,
+  ContentPresence,
+  ContentComment,
 ];

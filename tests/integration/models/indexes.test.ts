@@ -38,6 +38,9 @@ describe('model registry and indexes', () => {
       'api_keys',
       'intake_rate_limits',
       'media',
+      'content_locks',
+      'content_presences',
+      'content_comments',
     ]);
 
     const blogIndexes = await Blog.collection.indexes();
