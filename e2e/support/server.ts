@@ -11,7 +11,16 @@ import { resetEnvCache } from '@/lib/env';
 import { ensureIndexes } from '@/scripts/ensure-indexes';
 import Site from '@/models/Site';
 import User from '@/models/User';
-import { ADMIN, E2E_BASE_URL, E2E_JWT_SECRET, E2E_PORT, EDITOR, SITE_A, SITE_B } from './fixtures';
+import {
+  ADMIN,
+  ADMIN_B,
+  E2E_BASE_URL,
+  E2E_JWT_SECRET,
+  E2E_PORT,
+  EDITOR,
+  SITE_A,
+  SITE_B,
+} from './fixtures';
 
 const DB_NAME = 'cognerd_cms_e2e';
 
@@ -53,6 +62,15 @@ async function seed(): Promise<void> {
       name: EDITOR.name,
       role: 'editor',
       siteIds: [siteA._id],
+      status: 'active',
+      createdBy: null,
+    },
+    {
+      email: ADMIN_B.email,
+      passwordHash: await hashPassword(ADMIN_B.password),
+      name: ADMIN_B.name,
+      role: 'admin',
+      siteIds: [],
       status: 'active',
       createdBy: null,
     },

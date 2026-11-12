@@ -46,7 +46,7 @@ test('cover controls and scrollable description work on desktop and mobile', asy
   await expect(page.getByRole('button', { name: 'Remove cover' })).toBeVisible();
   await page.getByLabel('Image description').fill('Conference hall');
   await page.getByRole('button', { name: 'Remove cover' }).click();
-  await expect(page.getByRole('button', { name: 'Choose image' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Choose from library' })).toBeVisible();
 
   await page.route('**/api/admin/upload', (route) =>
     route.fulfill({

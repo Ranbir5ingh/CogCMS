@@ -16,5 +16,11 @@ export const EDITOR = {
   name: 'E2E Editor',
 };
 
+export const ADMIN_B = {
+  email: 'admin-b@e2e.test',
+  password: 'admin-b-e2e-password',
+  name: 'E2E Admin B',
+};
+
 export const SITE_A = { name: 'Acme Site', slug: 'acme', domain: 'https://acme.e2e.test' };
 export const SITE_B = { name: 'Beta Site', slug: 'beta', domain: 'https://beta.e2e.test' };
