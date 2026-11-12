@@ -55,6 +55,12 @@ A 400-pixel-wide image therefore keeps its original, a 320 WebP thumbnail, a 400
 
 The reusable `MediaPicker` is wired into the blog cover and inline-image flows, the event cover, and the author avatar, wherever those forms previously asked for a raw image URL. Pasting an external `https` URL still works. Uploaded files are served from `/media/{key}` with `nosniff`, an immutable cache header, and a strict key allow-list that rejects path traversal and the staging prefix used by the older S3 direct-upload path.
 
+![The Media Library grid, including a missing-alt badge](docs/screenshots/media-library.png)
+
+![The alt-text editor, with an accessibility hint](docs/screenshots/media-library-alt-editor.png)
+
+![The reusable media picker in the blog editor](docs/screenshots/media-picker.png)
+
 ### Architecture
 
 ```mermaid
@@ -154,6 +160,10 @@ When two editors open the same existing blog, event or whitepaper, they can see 
 - **Transport:** the browser opens an EventSource to `/api/admin/collaboration/stream`. The server polls Mongo every two seconds and pushes a snapshot when it changes. If SSE fails, the hook falls back to the same snapshot over HTTP polling, and the chrome shows a "Polling" hint. There is no paid realtime service and no Mongo change stream.
 
 New, unsaved drafts have no `resourceId` yet, so they stay unlocked until the document exists.
+
+![A co-editor sees the lock banner, presence avatars and a Take over action](docs/screenshots/collaboration-lock-banner.png)
+
+![The comments drawer on a document the current user is editing](docs/screenshots/collaboration-comments.png)
 
 ### Architecture
 
