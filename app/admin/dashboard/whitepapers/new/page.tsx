@@ -258,7 +258,7 @@ function WhitepaperEditorForm() {
     }),
     [],
   );
-  const quillFormats = ['header', 'list', 'bullet'];
+  const quillFormats = ['header', 'list'];
 
   const previewWhitepaper = useMemo(() => {
     const tags = formData.tags
