@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useSite } from '@/components/admin/site-provider';
 import { uploadImageDirect } from '@/lib/media/upload-client';
+import { MediaPicker } from '@/components/admin/media-picker';
 import { ConfirmDialog } from '@/components/admin/confirm-dialog';
 import { useLeaveGuard } from '@/lib/admin/use-leave-guard';
 import {
@@ -400,6 +401,7 @@ function Editor() {
   >({});
   const [dragging, setDragging] = useState(false);
   const [showImageUrl, setShowImageUrl] = useState(false);
+  const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
   const [openPicker, setOpenPicker] = useState<'start' | 'end' | null>(null);
   const [imageUrlInput, setImageUrlInput] = useState('');
   const fileInput = useRef<HTMLInputElement>(null);
@@ -727,7 +729,7 @@ function Editor() {
                       <button
                         type="button"
                         disabled={busy}
-                        onClick={() => fileInput.current?.click()}
+                        onClick={() => setMediaPickerOpen(true)}
                         className="rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs font-medium shadow-sm disabled:opacity-50"
                       >
                         Change cover
@@ -758,7 +760,7 @@ function Editor() {
                     onDrop={(event) => {
                       event.preventDefault();
                       setDragging(false);
-                      if (!busy) void upload(event.dataTransfer.files[0]);
+                      if (!busy) setMediaPickerOpen(true);
                     }}
                     className={`flex min-h-48 flex-col items-center justify-center rounded-xl border-2 border-dashed p-6 text-center transition-colors ${dragging ? 'border-orange-500 bg-orange-50' : 'border-stone-200 bg-stone-50/50'}`}
                   >
@@ -786,10 +788,10 @@ function Editor() {
                       <button
                         type="button"
                         disabled={busy}
-                        onClick={() => fileInput.current?.click()}
+                        onClick={() => setMediaPickerOpen(true)}
                         className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50 disabled:opacity-50"
                       >
-                        {busy ? 'Uploading…' : 'Choose image'}
+                        Choose from library
                       </button>
                       <button
                         type="button"
@@ -1087,6 +1089,16 @@ function Editor() {
           </aside>
         </div>
       )}
+      <MediaPicker
+        open={mediaPickerOpen}
+        onOpenChange={setMediaPickerOpen}
+        defaultSize="large"
+        title="Choose a cover image"
+        onPick={(pick) => {
+          setForm((current) => ({ ...current, imageUrl: pick.url, imageAlt: pick.alt }));
+          showToast('success', TOAST_MESSAGES.events.coverUploaded);
+        }}
+      />
       <ConfirmDialog {...leaveGuard.dialogProps} />
     </section>
   );
