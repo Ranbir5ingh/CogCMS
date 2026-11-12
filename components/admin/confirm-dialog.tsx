@@ -13,6 +13,7 @@ export function ConfirmDialog({
   description,
   confirmLabel = 'Yes, delete it',
   cancelLabel = 'Cancel',
+  closeOnConfirm = true,
   onConfirm,
 }: {
   open: boolean;
@@ -21,6 +22,8 @@ export function ConfirmDialog({
   description: ReactNode;
   confirmLabel?: string;
   cancelLabel?: string;
+  /** When false, the dialog stays open so the caller can show a follow-up (e.g. in-use details). */
+  closeOnConfirm?: boolean;
   onConfirm: () => void;
 }) {
   return (
@@ -63,7 +66,11 @@ export function ConfirmDialog({
             </AlertDialog.Cancel>
             <AlertDialog.Action asChild>
               <button
-                onClick={onConfirm}
+                type="button"
+                onClick={(event) => {
+                  if (!closeOnConfirm) event.preventDefault();
+                  onConfirm();
+                }}
                 className="inline-flex w-full justify-center rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-500 sm:w-auto"
               >
                 {confirmLabel}

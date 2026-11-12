@@ -412,6 +412,7 @@ export default function MediaLibraryPage() {
           `“${deleting?.originalName ?? ''}” will be removed from the library. If a post still uses it, the deletion is refused so you do not leave a broken image.`
         }
         confirmLabel={deletePending ? 'Deleting…' : 'Delete image'}
+        closeOnConfirm={false}
         onConfirm={() => void remove()}
       />
     </section>
