@@ -53,7 +53,7 @@ Each site has a private image library. Editors upload a JPEG, PNG, WebP, GIF or 
 
 A 400-pixel-wide image therefore keeps its original, a 320 WebP thumbnail, a 400 WebP medium, and a large size that aliases the medium file rather than writing a duplicate. Animated sources use the first frame. Alt text is encouraged on upload (assets with an empty alt show a "Missing alt" badge and an accessibility hint) and is required before the picker inserts an image into a document. Editors can search and paginate the library, edit alt text, and delete an unused asset. A delete that would break a blog, event, whitepaper, author avatar or site logo is rejected with a 409 and a list of references; the UI does not offer a force-delete.
 
-The reusable `MediaPicker` is wired into the blog cover and inline-image flows, the event cover, and the author avatar, wherever those forms previously asked for a raw image URL. Pasting an external `https` URL still works. Uploaded files are served from `/media/{key}` with `nosniff`, an immutable cache header, and a strict key allow-list that rejects path traversal and the staging prefix used by the older S3 direct-upload path.
+The reusable `MediaPicker` is wired into the blog cover and inline-image flows, the event and whitepaper covers, and the author avatar, wherever those forms previously asked for a raw image URL. Pasting an external `https` URL still works. Uploaded files are served from `/media/{key}` with `nosniff`, an immutable cache header, and a strict key allow-list that rejects path traversal and the staging prefix used by the older S3 direct-upload path.
 
 ![The Media Library grid, including a missing-alt badge](docs/screenshots/media-library.png)
 
@@ -133,7 +133,7 @@ Follow [Local setup](#local-setup). No extra service is required for the library
 1. Sign in at `/admin/login`, select a site, and open **Media** in the sidebar (`/admin/dashboard/media`).
 2. Drag a file onto the grid or use the upload button. Add alt text (recommended). The asset appears with thumbnail, dimensions and size.
 3. Search by file name or alt, paginate, edit alt, or delete. A referenced asset explains where it is used.
-4. In a blog, event or author form, choose **Choose from library**. Search or upload, set alt if it is missing, pick a size (thumbnail, medium, large or original) and insert. The form stores the public `/media/…` URL (or the S3 URL when that adapter is active).
+4. In a blog, event, whitepaper or author form, choose **Choose from library**. Search or upload, set alt if it is missing, pick a size (thumbnail, medium, large or original) and insert. The form stores the public `/media/…` URL (or the S3 URL when that adapter is active).
 
 To use S3 instead of disk, set the three `S3_*` variables. To relocate local files, set `MEDIA_ROOT`. Generated files under `data/media` are gitignored.
 
@@ -144,7 +144,6 @@ To use S3 instead of disk, set the three `S3_*` variables. To relocate local fil
 - GIF and animated WebP are stored as an original plus a still first-frame derivative, not as animated output.
 - There is no virus scanning, EXIF stripping beyond what sharp's re-encode does for derivatives, or automatic alt-text generation.
 - The public `/api/v1` contract is unchanged: consumers still see a URL string, not a structured `sizes` object.
-- Whitepaper documents have an `imageUrl` field but no cover-image UI yet, so the picker is not mounted there.
 - Force-delete exists only on the API; an admin-only UI would need a stronger confirmation than a regular delete.
 
 ## Live Collaboration
@@ -241,7 +240,7 @@ To exercise two users locally: `npm run seed:admin`, create a second user under 
 - SSE snapshots are at most two seconds behind; a busy comments thread is not instantaneous.
 - Presence and locks are per-document, not per-field. Two people cannot lock the title and the body independently.
 - Comments are flat and plain-text; no @mentions, attachments, or email notifications.
-- New unsaved drafts are intentionally unlocked. After the first save the editor currently redirects to the list, so collaboration on a just-created document starts the next time it is opened.
+- New unsaved drafts are intentionally unlocked until the first save. After that save the editor stays on the document (the URL gains `?slug=…`) and collaboration starts immediately.
 - Takeover does not force the previous holder's tab to discard its buffer; it makes their next save 409 (stale or lock). That is safer than wiping their work, but they need to copy unsaved text out themselves.
 - The polling fallback is slightly more chatty. A future WebSocket path could land behind the same snapshot schema without changing the UI hook.
 

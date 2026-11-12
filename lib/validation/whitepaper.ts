@@ -6,6 +6,7 @@ import {
   requiredTextSchema,
   slugSchema,
 } from './common';
+import { optionalMediaUrlSchema } from '@/lib/validation/media';
 
 const fields = {
   title: requiredTextSchema,
@@ -23,7 +24,7 @@ const fields = {
   stat2Label: optionalTextSchema,
   excerpt: optionalTextSchema,
   content: requiredSourceTextSchema,
-  imageUrl: optionalTextSchema,
+  imageUrl: optionalMediaUrlSchema,
   tag: optionalTextSchema,
   metaTitle: optionalTextSchema,
   metaDescription: optionalTextSchema,
