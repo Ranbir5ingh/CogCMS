@@ -3,12 +3,8 @@ import path from 'node:path';
 import { safeMediaPrefix, trustedImageExtension } from '@/lib/aws-s3';
 import { validationError } from '@/lib/http/errors';
 import type { MediaSizeName } from '@/models/Media';
-
-/** Finalized library objects only. Staging keys and traversal never match. */
-export const SAFE_MEDIA_KEY =
-  /^sites\/[a-z0-9_-]{1,80}\/\d{4}-\d{2}-\d{2}\/[a-f0-9]{32}(?:-(?:thumbnail|medium|large))?\.(jpg|png|webp|gif|avif)$/;
-
-export const MEDIA_PUBLIC_PATH = '/media';
+export { SAFE_MEDIA_KEY, MEDIA_PUBLIC_PATH } from '@/lib/media/public-url';
+import { SAFE_MEDIA_KEY } from '@/lib/media/public-url';
 
 export function assertSafeMediaKey(key: string): string {
   if (typeof key !== 'string' || !SAFE_MEDIA_KEY.test(key)) {

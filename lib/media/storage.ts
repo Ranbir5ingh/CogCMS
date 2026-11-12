@@ -4,7 +4,9 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { buildS3PublicUrl, createMediaClient, getS3Config, isS3Configured } from '@/lib/aws-s3';
 import { HttpError, validationError } from '@/lib/http/errors';
-import { MEDIA_PUBLIC_PATH, assertSafeMediaKey } from '@/lib/media/keys';
+import { assertSafeMediaKey } from '@/lib/media/keys';
+import { MEDIA_PUBLIC_PATH, mediaPublicOrigin } from '@/lib/media/public-url';
+export { mediaPublicOrigin } from '@/lib/media/public-url';
 
 const STORAGE_TIMEOUT_MS = 15_000;
 
@@ -19,15 +21,6 @@ export function mediaRoot(): string {
   const override = process.env.MEDIA_ROOT?.trim();
   if (override) return path.resolve(override);
   return path.resolve(process.cwd(), 'data', 'media');
-}
-
-export function mediaPublicOrigin(): string {
-  const raw = process.env.NEXT_PUBLIC_CMS_URL?.trim() || 'http://localhost:3003';
-  try {
-    return new URL(raw).origin;
-  } catch {
-    return 'http://localhost:3003';
-  }
 }
 
 function resolvedPath(root: string, key: string): string {
