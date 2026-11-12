@@ -122,6 +122,7 @@ Request flow for an upload: `requireUser` then a multipart same-origin CSRF chec
 - **First-party `/media/…` URLs are allowed in editorial image fields**, through a narrow `optionalMediaUrlSchema`. The global `isPublicHttpUrl` helper is unchanged and still rejects localhost, so we do not weaken URL checks elsewhere. Alternative: loosening `isPublicHttpUrl` itself, which would have accepted `http://localhost/…` in any field.
 - **Do not change `/api/v1`.** Published consumers keep receiving an `imageUrl` string. Alternative: a new public media resource, which would be a contract change out of scope.
 - **Site isolation is a `siteId` on every document and query**, plus the existing `x-cms-site` / `cms_site` resolution. There is no shared global library.
+- **Uploads are proxied through the Next.js server, not sent direct-to-cloud.** The server sniffs magic bytes, runs sharp for variants, and never hands a reviewer a cloud credential. Alternative: an S3 presigned POST or a Cloudinary signed upload, which is the right move at scale (see limitations) but would skip those checks unless a complete-upload callback re-ran them.
 
 ### Technology choices
 
@@ -154,6 +155,7 @@ To use S3 instead of disk, set the three `S3_*` variables. To relocate local fil
 - There is no virus scanning, EXIF stripping beyond what sharp's re-encode does for derivatives, or automatic alt-text generation.
 - The public `/api/v1` contract is unchanged: consumers still see a URL string, not a structured `sizes` object.
 - Force-delete exists only on the API; an admin-only UI would need a stronger confirmation than a regular delete.
+- Bytes still transit the app server. At scale, move the original to an S3 presigned POST (or a Cloudinary signed upload) and keep a short complete-upload callback that runs the same magic-byte check and sharp variants (or consumes cloud-generated sizes) before writing the Media document.
 
 ## Live Collaboration
 
